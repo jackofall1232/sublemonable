@@ -2,7 +2,7 @@
 
 <img src="website/public/lemon-slice.svg" alt="Sublemonable lemon slice logo" width="96" height="96" />
 
-# Sublemonable
+# SubLEMONable
 
 **Nothing lasts. That's the point.**
 
