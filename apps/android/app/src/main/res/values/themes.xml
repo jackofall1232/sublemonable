@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sublemonable — Copyright (C) 2026 Sublemonable contributors
+  Licensed under the GNU Affero General Public License v3.0 or later.
+  See the LICENSE file in the repository root for full license text.
+  SPDX-License-Identifier: AGPL-3.0-only
+
+  Dark only. No light theme exists in v1 (critical rule: no white backgrounds).
+-->
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.Sublemonable" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/background_primary</item>
+        <item name="android:statusBarColor">@color/background_primary</item>
+        <item name="android:navigationBarColor">@color/background_primary</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorAccent">@color/lemon</item>
+        <item name="android:forceDarkAllowed" tools:targetApi="29">false</item>
+    </style>
+</resources>

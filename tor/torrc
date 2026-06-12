@@ -1,0 +1,7 @@
+# Sublemonable Tor hidden service configuration
+# The hidden service forwards onion port 80 to the server container.
+DataDirectory /var/lib/tor
+HiddenServiceDir /var/lib/tor/sublemonable
+HiddenServicePort 80 server:8443
+# Hidden services don't need an open SOCKS port
+SocksPort 0

@@ -1,0 +1,93 @@
+# Sublemonable — Copyright (C) 2026 Sublemonable contributors
+# Licensed under the GNU Affero General Public License v3.0 or later.
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  typescript:
+    name: TypeScript — packages & web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build packages
+        run: pnpm build:packages
+      - name: Test (Vitest)
+        run: pnpm -r test
+      - name: Build web app
+        run: pnpm --filter @sublemonable/web build
+      - name: Build website
+        run: pnpm --filter @sublemonable/website build
+
+  server:
+    name: Go server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: server/go.sum
+      - run: go vet ./...
+      - run: go build ./...
+      - name: Test (go test)
+        run: go test -race ./...
+      - name: gofmt check
+        run: test -z "$(gofmt -l .)"
+
+  android:
+    name: Android — compile check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Validate Gradle project structure
+        run: |
+          test -f apps/android/settings.gradle.kts
+          test -f apps/android/app/build.gradle.kts
+
+  security:
+    name: Security scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: auto
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  docker:
+    name: Server image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build server image
+        run: docker build -t sublemonable-server:ci ./server

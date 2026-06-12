@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Sublemonable — Copyright (C) 2026 Sublemonable contributors
+     Licensed under the GNU Affero General Public License v3.0 or later.
+     SPDX-License-Identifier: AGPL-3.0-only -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="theme-color" content="#0D0C00" />
+    <title>Sublemonable</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Fonts are self-hosted: the messaging app makes no third-party requests
+         (no font-CDN IP leaks, works under the server's default-src 'self' CSP,
+         and remains intact over Tor). Space Grotesk is the spec's declared
+         fallback for Clash Display, whose license forbids redistribution. -->
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/inter-400.woff2" crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/space-grotesk-700.woff2" crossorigin />
+    <link rel="preload" as="font" type="font/woff2" href="/fonts/jetbrains-mono-400.woff2" crossorigin />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

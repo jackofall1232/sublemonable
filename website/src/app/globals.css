@@ -1,0 +1,66 @@
+/*
+  Sublemonable — Copyright (C) 2026 Sublemonable contributors
+  Licensed under the GNU Affero General Public License v3.0 or later.
+  See the LICENSE file in the repository root for full license text.
+  SPDX-License-Identifier: AGPL-3.0-only
+*/
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #0d0c00;
+  color: #fafaf2;
+}
+
+::selection {
+  background-color: #f5e642;
+  color: #0d0c00;
+}
+
+@layer components {
+  .btn-lemon {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill bg-lemon px-7 py-3.5 font-display text-base font-semibold text-ink-onlemon transition duration-base ease-brand hover:bg-lemon-bright hover:shadow-lemon-sm active:scale-95;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill border border-line px-7 py-3.5 font-display text-base font-semibold text-ink-primary transition duration-base ease-brand hover:border-lemon hover:text-lemon;
+  }
+
+  .prose-security h2 {
+    @apply mb-4 mt-16 font-display text-3xl font-semibold tracking-display text-ink-primary;
+  }
+
+  .prose-security h3 {
+    @apply mb-3 mt-10 font-display text-xl font-semibold text-ink-primary;
+  }
+
+  .prose-security p {
+    @apply mb-5 leading-relaxed text-ink-secondary;
+  }
+
+  .prose-security ul {
+    @apply mb-5 list-disc space-y-2 pl-6 text-ink-secondary;
+  }
+
+  .prose-security strong {
+    @apply font-medium text-ink-primary;
+  }
+
+  .prose-security a {
+    @apply text-lemon underline decoration-lemon/40 underline-offset-4 transition duration-base hover:decoration-lemon;
+  }
+
+  .prose-security code {
+    @apply rounded-sm bg-bg-elevated px-1.5 py-0.5 font-mono text-sm text-pulp;
+  }
+}

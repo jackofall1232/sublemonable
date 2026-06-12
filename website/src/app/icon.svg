@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Sublemonable — Copyright (C) 2026 Sublemonable contributors
+  Licensed under the GNU Affero General Public License v3.0 or later.
+  See the LICENSE file in the repository root for full license text.
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="Sublemonable lemon slice mark">
+  <circle cx="50" cy="50" r="46" fill="none" stroke="#D4C200" stroke-width="5"/>
+  <path d="M 50.86 39.03 L 52.98 12.12 A 38 38 0 0 1 74.68 21.10 L 57.14 41.64 A 11 11 0 0 0 50.86 39.03 Z" fill="#F5E642"/>
+  <path d="M 58.36 42.86 L 78.90 25.32 A 38 38 0 0 1 87.88 47.02 L 60.97 49.14 A 11 11 0 0 0 58.36 42.86 Z" fill="#F5E642"/>
+  <path d="M 60.97 50.86 L 87.88 52.98 A 38 38 0 0 1 78.90 74.68 L 58.36 57.14 A 11 11 0 0 0 60.97 50.86 Z" fill="#F5E642"/>
+  <path d="M 57.14 58.36 L 74.68 78.90 A 38 38 0 0 1 52.98 87.88 L 50.86 60.97 A 11 11 0 0 0 57.14 58.36 Z" fill="#F5E642"/>
+  <path d="M 49.14 60.97 L 47.02 87.88 A 38 38 0 0 1 25.32 78.90 L 42.86 58.36 A 11 11 0 0 0 49.14 60.97 Z" fill="#F5E642"/>
+  <path d="M 41.64 57.14 L 21.10 74.68 A 38 38 0 0 1 12.12 52.98 L 39.03 50.86 A 11 11 0 0 0 41.64 57.14 Z" fill="#F5E642"/>
+  <path d="M 39.03 49.14 L 12.12 47.02 A 38 38 0 0 1 21.10 25.32 L 41.64 42.86 A 11 11 0 0 0 39.03 49.14 Z" fill="#F5E642"/>
+  <path d="M 42.86 41.64 L 25.32 21.10 A 38 38 0 0 1 47.02 12.12 L 49.14 39.03 A 11 11 0 0 0 42.86 41.64 Z" fill="#F5E642"/>
+  <circle cx="50" cy="50" r="5.5" fill="#E8B800"/>
+</svg>
