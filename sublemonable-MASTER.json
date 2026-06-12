@@ -1,0 +1,1208 @@
+{
+  "project": {
+    "name": "Sublemonable",
+    "version": "1.0.0",
+    "description": "Zero-knowledge, end-to-end encrypted ephemeral messaging app for browser, iOS, and Android",
+    "license": "AGPL-3.0",
+    "repo_structure": {
+      "monorepo": true,
+      "package_manager": "pnpm workspaces",
+      "root_dirs": [
+        "apps/web",
+        "apps/ios",
+        "apps/android",
+        "packages/crypto",
+        "packages/protocol",
+        "packages/ui",
+        "server",
+        "docs",
+        "website"
+      ]
+    }
+  },
+  "security": {
+    "philosophy": "Zero-knowledge architecture. The server never sees, stores, or logs plaintext message content under any circumstances.",
+    "threat_model": {
+      "protected_against": [
+        "Server compromise \u2014 messages encrypted before leaving device",
+        "Man-in-the-middle \u2014 certificate pinning + TLS 1.3",
+        "Forward secrecy breach \u2014 Double Ratchet key rotation per message",
+        "Screenshot leaks \u2014 platform-specific prevention and detection",
+        "Metadata surveillance \u2014 minimal metadata, optional Tor routing",
+        "Replay attacks \u2014 message nonces and timestamp validation",
+        "Brute force \u2014 Argon2id key derivation for all passwords"
+      ],
+      "out_of_scope": [
+        "Compromised device (OS-level keyloggers)",
+        "Rubber hose cryptanalysis",
+        "Full OS-level screenshot prevention on browser"
+      ]
+    },
+    "encryption": {
+      "protocol": "Signal Protocol (Double Ratchet + X3DH)",
+      "libraries": {
+        "web": "libsodium.js (v0.7.x)",
+        "ios": "libsignal-client (Apple Swift Package)",
+        "android": "libsignal-client (Maven)"
+      },
+      "key_types": {
+        "identity_key": "Curve25519 long-term keypair, generated on device, never leaves device",
+        "signed_prekey": "Curve25519, rotated every 7 days, signed by identity key",
+        "one_time_prekeys": "Curve25519, batch of 100 uploaded to server (public keys only), consumed once",
+        "session_keys": "Derived via X3DH on first message, Double Ratchet thereafter",
+        "message_keys": "AES-256-GCM, derived per message, discarded after use"
+      },
+      "key_storage": {
+        "web": "IndexedDB encrypted with AES-256-GCM, master key derived from passphrase via Argon2id",
+        "ios": "iOS Secure Enclave + Keychain, biometric-protected",
+        "android": "Android Keystore System, hardware-backed where available"
+      },
+      "password_hashing": "Argon2id \u2014 memory: 65536 KB, iterations: 3, parallelism: 4"
+    },
+    "transport": {
+      "protocol": "WSS (WebSocket Secure) over TLS 1.3",
+      "certificate_pinning": {
+        "ios": "NSURLSession with pinned certificate SHA-256 hash",
+        "android": "OkHttp CertificatePinner",
+        "web": "Service Worker intercept with HPKP-style validation"
+      },
+      "tor": {
+        "enabled_by_default": false,
+        "opt_in": true,
+        "method": "Orbot integration on mobile, .onion address for browser via Tor Browser",
+        "onion_address": "configurable at deployment"
+      },
+      "headers": {
+        "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self'; connect-src 'self' wss:",
+        "X-Frame-Options": "DENY",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+      }
+    }
+  },
+  "server": {
+    "language": "Go 1.22+",
+    "framework": "Fiber v2 (HTTP) + Gorilla WebSocket",
+    "database": {
+      "primary": "PostgreSQL 16",
+      "orm": "sqlc (type-safe, no ORM magic)",
+      "encryption_at_rest": true,
+      "what_is_stored": [
+        "User account ID (UUID, not username)",
+        "Public identity key (Curve25519)",
+        "Public prekeys (one-time and signed)",
+        "Encrypted message envelopes (blob only, no metadata)",
+        "Delivery receipts (hash of message ID only)",
+        "Account creation timestamp"
+      ],
+      "what_is_never_stored": [
+        "Plaintext messages",
+        "Message content of any kind",
+        "IP addresses",
+        "Device identifiers",
+        "Contact lists",
+        "Read receipts linked to identity",
+        "Any logs that identify users"
+      ]
+    },
+    "message_persistence": {
+      "strategy": "Store-and-forward only",
+      "lifetime": "Messages deleted from server immediately upon delivery confirmation",
+      "undelivered_ttl_hours": 72,
+      "no_delivery_action": "Message purged after TTL, sender notified"
+    },
+    "api": {
+      "style": "REST for auth/registration + WebSocket for messaging",
+      "authentication": "JWT (RS256, 15min expiry) + refresh token (7 days, rotated on use)",
+      "rate_limiting": {
+        "registration": "5 per IP per hour",
+        "message_send": "100 per user per minute",
+        "prekey_fetch": "50 per user per minute"
+      },
+      "endpoints": {
+        "POST /api/v1/register": "Create account \u2014 accepts public identity key + prekeys only",
+        "POST /api/v1/session": "Authenticate \u2014 returns JWT",
+        "POST /api/v1/session/refresh": "Rotate refresh token",
+        "DELETE /api/v1/session": "Logout \u2014 invalidate tokens",
+        "GET /api/v1/users/:id/prekey": "Fetch one-time prekey bundle for X3DH",
+        "POST /api/v1/prekeys": "Upload new batch of one-time prekeys",
+        "GET /api/v1/prekeys/count": "Check prekey stock (triggers client to upload more)",
+        "WS /ws": "Authenticated WebSocket for real-time message delivery",
+        "DELETE /api/v1/account": "Full account deletion \u2014 purges all data"
+      }
+    },
+    "websocket_events": {
+      "client_to_server": [
+        "message.send \u2014 encrypted envelope + recipient ID",
+        "message.ack \u2014 delivery confirmation (triggers server deletion)",
+        "message.burn \u2014 request early destruction of a message",
+        "typing.start",
+        "typing.stop",
+        "presence.update"
+      ],
+      "server_to_client": [
+        "message.deliver \u2014 encrypted envelope",
+        "message.burned \u2014 recipient destroyed message notification",
+        "prekey.low \u2014 upload more prekeys",
+        "session.revoked \u2014 force logout",
+        "error"
+      ]
+    },
+    "infrastructure": {
+      "containerization": "Docker + Docker Compose",
+      "recommended_hosting": "Self-hosted VPS (Hetzner, Vultr) or fly.io",
+      "tor_hidden_service": "Optional nginx + tor configuration included",
+      "logging": {
+        "application_logs": "Errors and system events only \u2014 no request body logging, no user-identifiable data",
+        "access_logs": "Disabled",
+        "retention": "7 days rolling, then purged"
+      }
+    }
+  },
+  "packages": {
+    "crypto": {
+      "path": "packages/crypto",
+      "language": "TypeScript",
+      "description": "Shared crypto primitives used by web client. Wraps libsodium.js.",
+      "exports": [
+        "generateIdentityKeyPair()",
+        "generateSignedPrekey(identityKey)",
+        "generateOneTimePrekeys(count)",
+        "x3dhInitiate(myIdentityKey, theirPreKeyBundle) -> SessionKeys",
+        "x3dhRespond(myPreKeyBundle, initiatorMessage) -> SessionKeys",
+        "ratchetEncrypt(session, plaintext) -> EncryptedMessage",
+        "ratchetDecrypt(session, encryptedMessage) -> plaintext",
+        "deriveKeyFromPassword(password, salt) -> masterKey",
+        "encryptKeyStore(masterKey, keyStore) -> encryptedBlob",
+        "decryptKeyStore(masterKey, encryptedBlob) -> keyStore",
+        "generateInvisibleWatermark(userId, messageId) -> watermarkedCanvas"
+      ]
+    },
+    "protocol": {
+      "path": "packages/protocol",
+      "language": "TypeScript",
+      "description": "Shared message format, types, and serialization (used by web + server TS types)",
+      "message_envelope_schema": {
+        "id": "UUID v4",
+        "sender_id": "UUID",
+        "recipient_id": "UUID",
+        "ciphertext": "base64 string",
+        "ephemeral_key": "base64 Curve25519 public key (X3DH only, null after)",
+        "prekey_id": "number | null",
+        "message_number": "number (ratchet counter)",
+        "previous_chain_length": "number",
+        "timestamp": "ISO 8601 UTC",
+        "ttl_seconds": "number | null \u2014 null means no self-destruct",
+        "burn_on_read": "boolean",
+        "media_type": "text | image | file",
+        "version": "1"
+      }
+    },
+    "ui": {
+      "path": "packages/ui",
+      "description": "Shared React Native + React component library",
+      "components": [
+        "MessageBubble \u2014 renders with blur overlay when capture detected",
+        "ConversationList",
+        "ComposeBar",
+        "BurnTimer \u2014 countdown ring around message",
+        "SecurityBadge \u2014 shows encryption status",
+        "CaptureWarningOverlay",
+        "PassphraseSetup",
+        "KeyFingerprintDisplay \u2014 for manual key verification"
+      ]
+    }
+  },
+  "apps": {
+    "web": {
+      "path": "apps/web",
+      "framework": "React 18 + Vite",
+      "language": "TypeScript",
+      "styling": "Tailwind CSS",
+      "state_management": "Zustand",
+      "key_storage": "IndexedDB via idb library, AES-256-GCM encrypted",
+      "pwa": {
+        "enabled": true,
+        "offline_support": "Service Worker \u2014 queues outbound messages, caches UI only",
+        "manifest": true
+      },
+      "screenshot_protection": {
+        "method": "visibilitychange + window blur event listeners",
+        "action": "Apply CSS filter: blur(24px) + grayscale(1) to #messages-container",
+        "restore": "On window focus regained",
+        "watermark": {
+          "enabled": true,
+          "method": "Canvas steganography \u2014 encode recipient_id + timestamp into message background",
+          "visible": false,
+          "purpose": "Leak attribution \u2014 if screenshot shared, watermark identifies recipient"
+        }
+      },
+      "features": [
+        "E2EE messaging via Signal Protocol",
+        "Ephemeral messages with configurable TTL",
+        "Burn-on-read messages",
+        "Blur-on-screenshot-attempt",
+        "Invisible watermarking",
+        "No clipboard access to message text (CSS user-select: none)",
+        "Right-click disabled on message content",
+        "DevTools open detection with session warning",
+        "Contact key fingerprint verification",
+        "Passphrase-protected local key store"
+      ]
+    },
+    "ios": {
+      "path": "apps/ios",
+      "language": "Swift 5.9+",
+      "minimum_ios": "16.0",
+      "framework": "SwiftUI",
+      "dependencies": [
+        "libsignal-client (Swift Package)",
+        "CryptoKit (Apple built-in)",
+        "Starscream (WebSocket client)"
+      ],
+      "key_storage": "iOS Keychain + Secure Enclave for identity key",
+      "screenshot_protection": {
+        "screen_recording_detection": {
+          "api": "UIScreen.capturedDidChangeNotification",
+          "action": "Immediately overlay UIVisualEffectView (blur) over message list",
+          "realtime": true
+        },
+        "screenshot_detection": {
+          "api": "UIApplication.userDidTakeScreenshotNotification",
+          "action": "Show warning banner + log event locally",
+          "note": "Fires after screenshot taken \u2014 cannot prevent, only react"
+        },
+        "secure_text_fields": "All message text rendered in custom UIView with isSecureTextEntry-style protection where possible"
+      },
+      "features": [
+        "E2EE messaging via libsignal-client",
+        "Ephemeral messages with local + server TTL sync",
+        "Burn-on-read with animation",
+        "Screenshot detection with blur overlay",
+        "Certificate pinning via NSURLSession",
+        "Biometric authentication (Face ID / Touch ID)",
+        "Background app blur (UIApplicationWillResignActiveNotification)",
+        "No message preview in iOS notification center",
+        "Notification content extension \u2014 shows 'New Message' only, no content",
+        "Jailbreak detection (basic heuristics)",
+        "Optional Tor via Orbot URL scheme integration"
+      ]
+    },
+    "android": {
+      "path": "apps/android",
+      "language": "Kotlin",
+      "minimum_sdk": 26,
+      "target_sdk": 34,
+      "framework": "Jetpack Compose",
+      "dependencies": [
+        "libsignal-client-android (Maven)",
+        "OkHttp (WebSocket + certificate pinning)",
+        "Jetpack Security (EncryptedSharedPreferences)",
+        "Biometric (AndroidX)"
+      ],
+      "key_storage": "Android Keystore System (hardware-backed on supported devices)",
+      "screenshot_protection": {
+        "method": "WindowManager.LayoutParams.FLAG_SECURE",
+        "scope": "Applied to all Activities containing message content",
+        "effect": "OS-level hard block \u2014 screenshots and screen recording show black screen",
+        "note": "Strongest protection of all three platforms"
+      },
+      "features": [
+        "E2EE messaging via libsignal-client",
+        "FLAG_SECURE \u2014 hard OS-level screenshot block",
+        "Ephemeral messages with TTL",
+        "Burn-on-read",
+        "Certificate pinning via OkHttp CertificatePinner",
+        "Biometric authentication",
+        "EncryptedSharedPreferences for all local data",
+        "No notification content in lock screen",
+        "Root detection (basic heuristics)",
+        "Optional Tor via Orbot intent integration",
+        "App masking \u2014 ability to disguise app icon"
+      ]
+    }
+  },
+  "features": {
+    "messaging": {
+      "text": true,
+      "images": {
+        "enabled": true,
+        "encryption": "Encrypted as binary blob using same Signal Protocol envelope",
+        "storage": "Never stored on server. Client-to-client direct encrypted transfer via relay"
+      },
+      "disappearing_messages": {
+        "enabled": true,
+        "options_seconds": [
+          30,
+          60,
+          300,
+          3600,
+          86400,
+          604800
+        ],
+        "timer_starts": "on_delivery",
+        "enforced_both_sides": true
+      },
+      "burn_on_read": {
+        "enabled": true,
+        "description": "Message destroyed on all devices immediately after first open",
+        "server_notified": true,
+        "server_purges_on_ack": true
+      },
+      "typing_indicators": {
+        "enabled": true,
+        "encrypted": true,
+        "note": "Typing events sent as encrypted signals, not plaintext"
+      },
+      "read_receipts": {
+        "enabled": true,
+        "user_controlled": true,
+        "implementation": "Encrypted signal \u2014 server never knows read status"
+      },
+      "message_reactions": false,
+      "group_messaging": {
+        "enabled": false,
+        "planned": true,
+        "note": "Phase 2 \u2014 requires Sender Keys protocol extension"
+      }
+    },
+    "accounts": {
+      "username": "Optional display name, not used for routing",
+      "routing_id": "UUID \u2014 never exposed to other users directly",
+      "discovery": "QR code exchange or direct link (no phone number, no email required)",
+      "phone_number_required": false,
+      "email_required": false,
+      "account_deletion": {
+        "full_purge": true,
+        "purges": [
+          "All prekeys",
+          "All pending message envelopes",
+          "Account record"
+        ],
+        "irreversible": true
+      }
+    },
+    "contact_verification": {
+      "enabled": true,
+      "method": "Safety Number comparison (SHA-512 fingerprint of both identity keys)",
+      "qr_code_verification": true,
+      "in_person_verification": "Recommended for high-security contacts"
+    }
+  },
+  "build_order": {
+    "phase_1": {
+      "name": "Core Encrypted Messaging",
+      "deliverables": [
+        "Go server with WebSocket + PostgreSQL",
+        "packages/crypto \u2014 Signal Protocol wrapper",
+        "packages/protocol \u2014 message schema + types",
+        "apps/web \u2014 basic E2EE chat UI",
+        "Registration, key exchange (X3DH), message send/receive",
+        "Server-side message deletion on delivery ack",
+        "JWT auth with refresh rotation"
+      ]
+    },
+    "phase_2": {
+      "name": "Ephemeral Messages + Screenshot Protection",
+      "deliverables": [
+        "Burn-on-read implementation (all platforms)",
+        "Disappearing message TTL system",
+        "Web blur-on-focus-loss + invisible watermark",
+        "iOS screenshot detection + blur overlay",
+        "Android FLAG_SECURE implementation"
+      ]
+    },
+    "phase_3": {
+      "name": "Mobile Apps",
+      "deliverables": [
+        "apps/ios \u2014 full SwiftUI app",
+        "apps/android \u2014 full Jetpack Compose app",
+        "Certificate pinning on both",
+        "Biometric auth on both",
+        "Push notifications (content-free)"
+      ]
+    },
+    "phase_4": {
+      "name": "Metadata Privacy + Advanced Security",
+      "deliverables": [
+        "Tor hidden service server config",
+        "Orbot integration on mobile",
+        "Jailbreak / root detection",
+        "Key fingerprint verification UI",
+        "Security audit prep + documentation"
+      ]
+    }
+  },
+  "devops": {
+    "ci_cd": "GitHub Actions",
+    "testing": {
+      "unit": "Go test (server), Vitest (web), XCTest (iOS), JUnit (Android)",
+      "e2e": "Playwright (web), Detox (React Native if used)",
+      "security_scanning": "Semgrep + Trivy in CI pipeline"
+    },
+    "docker": {
+      "services": [
+        "server",
+        "postgres",
+        "tor (optional)"
+      ],
+      "compose_file": "docker-compose.yml + docker-compose.tor.yml"
+    },
+    "environment_variables": [
+      "DATABASE_URL",
+      "JWT_PRIVATE_KEY_PATH",
+      "JWT_PUBLIC_KEY_PATH",
+      "SERVER_PORT",
+      "TLS_CERT_PATH",
+      "TLS_KEY_PATH",
+      "MAX_PREKEYS_PER_USER",
+      "MESSAGE_TTL_UNDELIVERED_HOURS",
+      "RATE_LIMIT_ENABLED",
+      "TOR_ENABLED"
+    ]
+  },
+  "fable_instructions": {
+    "note": "Instructions for Claude Code / Fable to build this project end-to-end",
+    "start_here": "Read this entire JSON before writing a single line of code",
+    "order": [
+      "1. Scaffold monorepo with pnpm workspaces and all root directories",
+      "2. Write all open source root files: LICENSE AGPL-3.0 full text, README.md, SECURITY.md, CONTRIBUTING.md, AUDIT.md, CHANGELOG.md",
+      "3. Write GitHub templates: .github/ISSUE_TEMPLATE/bug_report.md, feature_request.md, PULL_REQUEST_TEMPLATE.md",
+      "4. Write all docs: docs/SECURITY_MODEL.md, docs/SETUP.md, docs/SELF_HOSTING.md",
+      "5. Build packages/protocol \u2014 TypeScript types and message schemas",
+      "6. Build packages/crypto \u2014 libsodium.js wrappers for all key operations",
+      "7. Build packages/ui \u2014 LemonSlice SVG animated component FIRST, then all other components from design_system.components",
+      "8. Build server in Go \u2014 database schema sqlc, WebSocket hub, REST endpoints, JWT auth",
+      "9. Build apps/web \u2014 React + Vite, integrate packages/crypto + packages/ui, full chat UI with screenshot protection and invisible watermark",
+      "10. Build apps/android \u2014 Kotlin + Compose, FLAG_SECURE, libsignal-client, OkHttp pinning",
+      "11. Build apps/ios \u2014 SwiftUI, libsignal-client, Keychain, capture detection overlay",
+      "12. Build website \u2014 Next.js 14 + Tailwind + Framer Motion marketing site for sublemonable.com per marketing_site spec",
+      "13. Write docker-compose.yml + docker-compose.tor.yml",
+      "14. Write .github/workflows/ci.yml GitHub Actions CI pipeline",
+      "15. Final pass: verify every file in open_source.root_files_to_generate exists and is complete"
+    ],
+    "critical_rules": [
+      "NEVER log message content anywhere server or client",
+      "NEVER store plaintext keys always encrypted at rest",
+      "NEVER skip nonce generation every encrypted message needs a unique nonce",
+      "NEVER reuse keys one-time prekeys are single-use by design",
+      "NEVER add analytics crash reporting or telemetry of any kind",
+      "NEVER use white backgrounds in UI minimum dark value is #1A1800",
+      "NEVER use blue for interactive elements lemon yellow #F5E642 owns all interactivity",
+      "ALWAYS delete server-side message immediately after delivery ack",
+      "ALWAYS apply FLAG_SECURE on every Android Activity with message content",
+      "ALWAYS use parameterized SQL queries no string concatenation",
+      "ALWAYS validate JWT on every authenticated endpoint",
+      "ALWAYS rotate refresh tokens on use",
+      "ALWAYS apply AGPL-3.0 license header comment to every source file",
+      "Every loading state uses the LemonSlice spinner from packages/ui no other loaders",
+      "The burn animation uses particle dissolve upward not an opacity fade",
+      "Screenshot blur triggers in 120ms max it must feel jarring and protective",
+      "Key fingerprints always render in JetBrains Mono",
+      "Notification content is always New message never preview message content"
+    ],
+    "design_reference": "See design_system, marketing_site, and fable_ui_instructions keys in this file for full UI/UX spec. Build the LemonSlice SVG component in packages/ui FIRST before any screen work. It is used in logo, loader, burn timer, security badge, and send button."
+  },
+  "open_source": {
+    "license": "AGPL-3.0",
+    "license_rationale": "Anyone running a modified Sublemonable as a service must open source their changes. Prevents silent commercial forks. Same license used by Signal.",
+    "repository": {
+      "visibility": "public",
+      "platform": "GitHub",
+      "recommended_name": "sublemonable/sublemonable",
+      "topics": [
+        "encryption",
+        "privacy",
+        "messaging",
+        "signal-protocol",
+        "e2ee",
+        "zero-knowledge",
+        "open-source"
+      ]
+    },
+    "root_files_to_generate": {
+      "LICENSE": {
+        "content": "AGPL-3.0 full license text",
+        "note": "Fetch full AGPL-3.0 text from https://www.gnu.org/licenses/agpl-3.0.txt and write verbatim"
+      },
+      "README.md": {
+        "sections": [
+          "Hero \u2014 lemon slice logo + tagline: Nothing lasts. That's the point.",
+          "What is Sublemonable \u2014 2 paragraph plain-language description",
+          "Security model \u2014 bullet summary linking to docs/SECURITY_MODEL.md",
+          "Features \u2014 E2EE, burn-on-read, screenshot protection, no phone number required",
+          "Platforms \u2014 Browser, iOS, Android badges",
+          "Getting started \u2014 link to docs/SETUP.md",
+          "Self-hosting \u2014 link to docs/SELF_HOSTING.md",
+          "Contributing \u2014 link to CONTRIBUTING.md",
+          "Security disclosure \u2014 link to SECURITY.md",
+          "License \u2014 AGPL-3.0 badge"
+        ],
+        "badges": [
+          "License: AGPL-3.0",
+          "Build: GitHub Actions",
+          "Platforms: iOS | Android | Browser",
+          "Encryption: Signal Protocol"
+        ]
+      },
+      "SECURITY.md": {
+        "purpose": "Responsible disclosure policy for security researchers",
+        "sections": [
+          {
+            "title": "Reporting a vulnerability",
+            "content": "Do NOT open a public issue. Use GitHub private security advisories."
+          },
+          {
+            "title": "What to include",
+            "content": "Vulnerability description, reproduction steps, potential impact, suggested fix if any"
+          },
+          {
+            "title": "Response timeline",
+            "content": "Acknowledgement within 48 hours. Fix target within 90 days of confirmed vulnerability."
+          },
+          {
+            "title": "Scope in scope",
+            "content": "server, web app, iOS app, Android app, packages/crypto, packages/protocol"
+          },
+          {
+            "title": "Scope out of scope",
+            "content": "Third-party dependencies, social engineering"
+          },
+          {
+            "title": "Recognition",
+            "content": "Valid disclosures credited in AUDIT.md and release notes unless researcher prefers anonymity"
+          },
+          {
+            "title": "Safe harbor",
+            "content": "Good-faith research under this policy is authorized. We will not pursue legal action against researchers who follow it."
+          }
+        ]
+      },
+      "CONTRIBUTING.md": {
+        "purpose": "Contribution guidelines",
+        "sections": [
+          {
+            "title": "Before contributing",
+            "content": "Read docs/SECURITY_MODEL.md. All contributions must maintain zero-knowledge architecture."
+          },
+          {
+            "title": "Welcome contributions",
+            "items": [
+              "Bug fixes",
+              "Security improvements",
+              "Performance improvements",
+              "Documentation",
+              "Translations",
+              "New platform support"
+            ]
+          },
+          {
+            "title": "Hard rules never do this",
+            "items": [
+              "Add server-side message logging of any kind",
+              "Weaken encryption defaults",
+              "Add analytics, telemetry, or crash reporting",
+              "Store user-identifiable metadata",
+              "Change cryptography without a detailed explanation reviewed by a maintainer"
+            ]
+          },
+          {
+            "title": "PR process",
+            "items": [
+              "Fork and create feature branch",
+              "Write or update tests",
+              "Run full test suite locally",
+              "Open PR with clear description of what and why",
+              "Security-sensitive PRs take longer"
+            ]
+          },
+          {
+            "title": "Code style",
+            "items": [
+              "Go: gofmt + golangci-lint",
+              "TypeScript: ESLint + Prettier",
+              "Swift: SwiftLint",
+              "Kotlin: ktlint"
+            ]
+          }
+        ]
+      },
+      "AUDIT.md": {
+        "purpose": "Log of third-party security audits",
+        "initial_content": "No audits conducted yet. This file updates as audits complete. Contact us via SECURITY.md if you want to conduct an audit."
+      },
+      "CHANGELOG.md": {
+        "format": "Keep a Changelog \u2014 keepachangelog.com",
+        "initial_content": "## [Unreleased]\n### Added\n- Initial release"
+      },
+      ".github/ISSUE_TEMPLATE/bug_report.md": {
+        "fields": [
+          "Description",
+          "Steps to reproduce",
+          "Expected behavior",
+          "Platform iOS Android Browser",
+          "App version"
+        ]
+      },
+      ".github/ISSUE_TEMPLATE/feature_request.md": {
+        "fields": [
+          "Feature description",
+          "Use case",
+          "Security implications considered"
+        ]
+      },
+      ".github/PULL_REQUEST_TEMPLATE.md": {
+        "checklist": [
+          "No logging added",
+          "No encryption weakened",
+          "No tracking added",
+          "Tests added or updated",
+          "SECURITY_MODEL.md updated if architecture changed"
+        ]
+      },
+      "docs/SECURITY_MODEL.md": {
+        "purpose": "Full technical security model for users and auditors",
+        "sections": [
+          "Architecture overview with zero knowledge diagram",
+          "Signal Protocol implementation details",
+          "Key generation and storage per platform",
+          "What the server stores and provably cannot store",
+          "Transport security TLS 1.3 and certificate pinning",
+          "Screenshot protection per platform",
+          "Metadata minimization approach",
+          "Threat model protected and out of scope",
+          "Tor routing implementation",
+          "Audit history"
+        ]
+      },
+      "docs/SETUP.md": {
+        "sections": [
+          "Prerequisites",
+          "Clone and install",
+          "Environment variables",
+          "Run server",
+          "Run web app",
+          "Run iOS simulator",
+          "Run Android emulator",
+          "Run tests"
+        ]
+      },
+      "docs/SELF_HOSTING.md": {
+        "sections": [
+          "Requirements",
+          "Docker Compose quickstart",
+          "Environment variables reference",
+          "TLS setup",
+          "Optional Tor hidden service",
+          "Updating",
+          "Backup and recovery"
+        ]
+      }
+    }
+  },
+  "design_system": {
+    "name": "Sublemonable Design System",
+    "version": "1.0.0",
+    "philosophy": "Secure doesn't have to feel cold. Sublemonable is sharp, bright, and alive \u2014 like biting into a lemon. Every screen should feel like privacy is a feature you want, not a compromise you made.",
+    "tokens": {
+      "color": {
+        "core": {
+          "lemon": "#F5E642",
+          "lemon_bright": "#FFE500",
+          "lemon_deep": "#D4C200",
+          "lemon_pale": "#FFFDE0",
+          "lemon_zest": "#E8B800",
+          "rind": "#2A2500",
+          "rind_soft": "#3D3800",
+          "pulp": "#FFF8C0",
+          "white": "#FFFFFF",
+          "off_white": "#FAFAF2"
+        },
+        "semantic": {
+          "background_primary": "#0D0C00",
+          "background_secondary": "#1A1800",
+          "background_elevated": "#242100",
+          "background_message_sent": "#F5E642",
+          "background_message_received": "#242100",
+          "text_primary": "#FAFAF2",
+          "text_secondary": "#A8A070",
+          "text_on_lemon": "#0D0C00",
+          "text_muted": "#5A5630",
+          "border": "#2E2B00",
+          "border_active": "#F5E642",
+          "burn_red": "#FF4444",
+          "burn_orange": "#FF8C00",
+          "verified_green": "#4ADE80",
+          "error": "#FF4444",
+          "success": "#4ADE80"
+        },
+        "gradients": {
+          "hero": "linear-gradient(135deg, #0D0C00 0%, #1A1800 50%, #2A2500 100%)",
+          "lemon_glow": "radial-gradient(ellipse at center, rgba(245,230,66,0.15) 0%, transparent 70%)",
+          "message_burn": "linear-gradient(90deg, #FF4444 0%, #FF8C00 50%, #F5E642 100%)",
+          "lemon_slice": "conic-gradient(from 0deg, #F5E642 0%, #D4C200 30%, #F5E642 60%, #FFE500 100%)"
+        }
+      },
+      "typography": {
+        "display": {
+          "family": "Clash Display",
+          "fallback": "'Space Grotesk', sans-serif",
+          "source": "Google Fonts / Fontshare",
+          "weights": [
+            500,
+            600,
+            700
+          ],
+          "usage": "App name, hero headlines, section titles",
+          "letter_spacing": "-0.03em"
+        },
+        "body": {
+          "family": "Inter",
+          "fallback": "system-ui, sans-serif",
+          "weights": [
+            400,
+            500
+          ],
+          "usage": "Messages, UI labels, body copy"
+        },
+        "mono": {
+          "family": "JetBrains Mono",
+          "fallback": "'Fira Code', monospace",
+          "weights": [
+            400
+          ],
+          "usage": "Key fingerprints, security codes, timestamps"
+        },
+        "scale": {
+          "xs": "0.75rem",
+          "sm": "0.875rem",
+          "base": "1rem",
+          "lg": "1.125rem",
+          "xl": "1.25rem",
+          "2xl": "1.5rem",
+          "3xl": "1.875rem",
+          "4xl": "2.25rem",
+          "5xl": "3rem",
+          "hero": "5rem"
+        }
+      },
+      "spacing": {
+        "base_unit": "4px",
+        "scale": [
+          0,
+          4,
+          8,
+          12,
+          16,
+          20,
+          24,
+          32,
+          40,
+          48,
+          64,
+          80,
+          96,
+          128
+        ]
+      },
+      "radius": {
+        "sm": "6px",
+        "md": "12px",
+        "lg": "18px",
+        "xl": "24px",
+        "bubble_sent": "18px 18px 4px 18px",
+        "bubble_received": "18px 18px 18px 4px",
+        "pill": "9999px",
+        "circle": "50%"
+      },
+      "shadows": {
+        "lemon_glow_sm": "0 0 12px rgba(245, 230, 66, 0.3)",
+        "lemon_glow_md": "0 0 32px rgba(245, 230, 66, 0.2)",
+        "lemon_glow_lg": "0 0 80px rgba(245, 230, 66, 0.15)",
+        "card": "0 4px 24px rgba(0,0,0,0.4)",
+        "burn": "0 0 20px rgba(255, 68, 68, 0.4)"
+      },
+      "motion": {
+        "duration_fast": "120ms",
+        "duration_base": "200ms",
+        "duration_slow": "400ms",
+        "duration_dramatic": "600ms",
+        "easing_default": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "easing_bounce": "cubic-bezier(0.34, 1.56, 0.64, 1)",
+        "easing_burn": "cubic-bezier(0.4, 0, 1, 1)"
+      }
+    },
+    "signature_element": {
+      "name": "The Lemon Slice",
+      "description": "A segmented circle that appears as the logo mark, loading indicator, burn timer, and security badge. Drawn with SVG \u2014 segments fill with lemon-yellow as encryption handshake completes, as a message timer counts down, or as security level increases. It's the heartbeat of the app \u2014 every moment of waiting, protecting, or destroying is shown through this one motif.",
+      "variants": [
+        "logo_mark \u2014 static, 8-segment lemon slice icon",
+        "loading_spinner \u2014 segments illuminate clockwise",
+        "burn_timer \u2014 segments extinguish as TTL counts down, final segment triggers destruction animation",
+        "security_indicator \u2014 segments fill based on verification level (0-8)",
+        "send_button \u2014 holds the lemon slice, pulses on press"
+      ]
+    },
+    "components": {
+      "message_bubble": {
+        "sent": {
+          "background": "#F5E642",
+          "text_color": "#0D0C00",
+          "border_radius": "18px 18px 4px 18px",
+          "padding": "10px 14px",
+          "font_size": "0.9375rem",
+          "max_width": "72%"
+        },
+        "received": {
+          "background": "#242100",
+          "text_color": "#FAFAF2",
+          "border": "1px solid #2E2B00",
+          "border_radius": "18px 18px 18px 4px",
+          "padding": "10px 14px",
+          "font_size": "0.9375rem",
+          "max_width": "72%"
+        },
+        "burn_on_read": {
+          "indicator": "Small flame icon on bubble corner, lemon-orange color",
+          "on_open": "Bubble catches fire animation \u2014 particles dissolve upward, text fades, bubble shrinks to nothing over 600ms"
+        },
+        "timed": {
+          "indicator": "Mini lemon-slice burn timer in corner of bubble",
+          "warning_pulse": "Lemon glow pulses when <10% time remains"
+        },
+        "screenshot_blur": {
+          "web": "filter: blur(24px) saturate(0) \u2014 applied instantly on visibilitychange/blur",
+          "description": "Entire message list blurs \u2014 layout remains visible, content does not"
+        }
+      },
+      "compose_bar": {
+        "background": "#1A1800",
+        "border_top": "1px solid #2E2B00",
+        "input": {
+          "background": "#242100",
+          "border": "1px solid #2E2B00",
+          "border_focus": "1px solid #F5E642",
+          "border_radius": "24px",
+          "placeholder_color": "#5A5630",
+          "text_color": "#FAFAF2"
+        },
+        "send_button": {
+          "background": "#F5E642",
+          "icon_color": "#0D0C00",
+          "border_radius": "50%",
+          "size": "40px",
+          "hover": "background: #FFE500, box-shadow: 0 0 16px rgba(245,230,66,0.4)",
+          "active": "scale(0.92) \u2014 spring back with easing_bounce"
+        },
+        "attachment_button": {
+          "color": "#A8A070",
+          "hover_color": "#F5E642"
+        }
+      },
+      "burn_timer_ring": {
+        "description": "The lemon slice SVG used as countdown indicator on timed messages",
+        "segments": 8,
+        "full_color": "#F5E642",
+        "empty_color": "#2E2B00",
+        "critical_color": "#FF8C00",
+        "final_color": "#FF4444",
+        "animation": "Each segment fades out sequentially as TTL expires. Final segment triggers destruction animation."
+      },
+      "conversation_list_item": {
+        "background": "transparent",
+        "hover": "#1A1800",
+        "active": "#242100",
+        "avatar": {
+          "shape": "circle",
+          "size": "44px",
+          "background": "lemon gradient",
+          "verified_ring": "2px solid #4ADE80"
+        },
+        "unread_badge": {
+          "background": "#F5E642",
+          "text_color": "#0D0C00",
+          "border_radius": "pill"
+        },
+        "preview_text": {
+          "color": "#5A5630",
+          "text": "Always shows 'Encrypted message' \u2014 never previews content"
+        }
+      },
+      "security_badge": {
+        "verified": {
+          "color": "#4ADE80",
+          "icon": "lemon slice with checkmark",
+          "label": "Keys verified"
+        },
+        "unverified": {
+          "color": "#A8A070",
+          "icon": "lemon slice outline",
+          "label": "Tap to verify"
+        },
+        "warning": {
+          "color": "#FF8C00",
+          "label": "Key changed \u2014 verify identity"
+        }
+      },
+      "passphrase_screen": {
+        "background": "#0D0C00",
+        "center_element": "Large lemon slice logo, segments illuminate as passphrase strength increases",
+        "input": {
+          "style": "minimal underline-only input, lemon-yellow on focus",
+          "font": "Inter, large, centered"
+        },
+        "strength_indicator": "Lemon slice fills segment by segment"
+      },
+      "key_fingerprint": {
+        "font": "JetBrains Mono",
+        "color": "#A8A070",
+        "highlight": "#F5E642",
+        "format": "Groups of 4 hex chars separated by spaces",
+        "qr_code_border": "lemon-yellow, rounded corners"
+      },
+      "notification_banner": {
+        "background": "#F5E642",
+        "text": "#0D0C00",
+        "border_radius": "12px",
+        "icon": "lemon slice"
+      }
+    },
+    "screens": {
+      "splash": {
+        "background": "#0D0C00",
+        "center": "Lemon slice logo \u2014 segments animate in clockwise, then pulse once",
+        "wordmark": "SUBLEMONABLE in Clash Display 700, lemon yellow, tracked wide",
+        "tagline": "Nothing lasts. That's the point."
+      },
+      "onboarding": {
+        "style": "Full-screen card stack, swipe through",
+        "slides": [
+          {
+            "visual": "Animated lemon slice \u2014 segments = encryption layers",
+            "headline": "End-to-end encrypted",
+            "body": "Your messages are locked before they leave your device. We can't read them. Nobody can."
+          },
+          {
+            "visual": "Message bubble with burn animation",
+            "headline": "Messages that disappear",
+            "body": "Set any message to self-destruct. Once read, once seen, then gone."
+          },
+          {
+            "visual": "Pixelated/blurred screenshot mockup",
+            "headline": "Screenshots? Blocked.",
+            "body": "On Android, screenshots are impossible. On iOS and browser, we blur instantly."
+          },
+          {
+            "visual": "QR code with lemon-slice overlay",
+            "headline": "No phone number needed",
+            "body": "Add contacts by QR code or link. We don't need your number, your email, or your name."
+          }
+        ]
+      },
+      "chat_list": {
+        "header": "SUBLEMONABLE wordmark left-aligned, settings icon right",
+        "search": "Lemon-bordered pill search bar",
+        "fab": "Compose button \u2014 lemon yellow circle, bottom right, lemon-glow shadow"
+      },
+      "chat_view": {
+        "header": {
+          "avatar": "left",
+          "name_and_status": "center",
+          "actions": "verify key (lemon slice icon), burn all (flame icon), back"
+        },
+        "message_list": {
+          "date_dividers": "Centered, JetBrains Mono, muted color",
+          "scroll_behavior": "Smooth, momentum scroll"
+        },
+        "encryption_notice": "Persistent micro-badge at top: '\ud83d\udd12 End-to-end encrypted' in muted lemon"
+      },
+      "settings": {
+        "style": "Dark grouped list, lemon accents on active toggles",
+        "sections": [
+          "Security \u2014 passphrase, biometrics, key fingerprint",
+          "Privacy \u2014 default TTL, burn-on-read default, screenshot watermark",
+          "Account \u2014 identity key, delete account",
+          "Network \u2014 Tor routing toggle, connection status",
+          "Appearance \u2014 theme (dark only for now)"
+        ]
+      }
+    },
+    "animation_moments": {
+      "message_send": "Bubble scales from compose bar with spring easing, slides up",
+      "message_burn": "Flame particles emit upward from bubble, bubble chars and shrinks to a lemon-slice ash icon, then fades",
+      "encryption_handshake": "Lemon slice segments illuminate one by one on first message to new contact",
+      "screenshot_blur": "Frosted glass effect slides over message list in 120ms \u2014 fast and jarring on purpose",
+      "key_verified": "Lemon slice fully illuminates in green with a single ring pulse",
+      "app_unlock": "Biometric success: lemon slice opens like a iris, reveals chat list"
+    }
+  },
+  "marketing_site": {
+    "domain": "sublemonable.com",
+    "stack": "Next.js 14 + Tailwind CSS + Framer Motion",
+    "hosting": "Vercel",
+    "brand_voice": {
+      "tone": "Dry, sharp, confident. Never corporate. Never paranoid. Security is effortless here.",
+      "examples": {
+        "good": [
+          "Nothing lasts. That's the point.",
+          "Your messages aren't our business.",
+          "Read it. It's gone.",
+          "Encrypted before it leaves your hands.",
+          "Screenshots get blurred. Snoops get nothing."
+        ],
+        "avoid": [
+          "Military-grade encryption",
+          "We take your privacy seriously",
+          "Best-in-class security solution",
+          "Protect your sensitive communications"
+        ]
+      }
+    },
+    "pages": {
+      "home": {
+        "sections": [
+          {
+            "id": "hero",
+            "type": "full_viewport",
+            "background": "#0D0C00",
+            "visual": "Animated lemon slice \u2014 large, centered, slowly rotating, casting lemon-yellow glow on dark background",
+            "headline": "Nothing lasts.",
+            "subheadline": "That's the point.",
+            "body": "Sublemonable is end-to-end encrypted messaging that disappears. No logs. No screenshots. No trace.",
+            "cta_primary": {
+              "text": "Get the app",
+              "color": "lemon"
+            },
+            "cta_secondary": {
+              "text": "How it works",
+              "color": "ghost"
+            }
+          },
+          {
+            "id": "features",
+            "type": "alternating_scroll",
+            "items": [
+              {
+                "headline": "Encrypted before it leaves your hands.",
+                "body": "Signal Protocol. Every message gets its own key. We store nothing readable. Not because the law says so \u2014 because it's technically impossible.",
+                "visual": "Animated key exchange diagram \u2014 two lemon slices passing encrypted segments between them"
+              },
+              {
+                "headline": "Read it. Watch it go.",
+                "body": "Burn-on-read. Timed destruction. 30 seconds to a week \u2014 your call. The server deletes the moment your recipient gets it.",
+                "visual": "Message bubble burn animation loop"
+              },
+              {
+                "headline": "Screenshots? We blur those.",
+                "body": "Android blocks them entirely. iOS and browser blur your messages the instant a screenshot is attempted. We also watermark every conversation \u2014 if something leaks, we know who did it.",
+                "visual": "Split mockup: left phone blurred, right shows 'Screenshot blocked'"
+              },
+              {
+                "headline": "No number. No email. No name.",
+                "body": "Connect by QR code. Your identity is a key pair we generate on your device. We don't know who you are.",
+                "visual": "QR code scan animation with lemon-slice overlay"
+              }
+            ]
+          },
+          {
+            "id": "how_it_works",
+            "type": "horizontal_scroll_steps",
+            "steps": [
+              {
+                "label": "Generate keys",
+                "description": "Your device creates your identity. Keys never leave your device."
+              },
+              {
+                "label": "Exchange codes",
+                "description": "Share a QR or link. No personal info changes hands."
+              },
+              {
+                "label": "Send encrypted",
+                "description": "Every message encrypted locally before sending."
+              },
+              {
+                "label": "Delivered and deleted",
+                "description": "Server purges message the instant it's delivered."
+              },
+              {
+                "label": "Gone forever",
+                "description": "Set to burn, or burn on read. Nothing stays."
+              }
+            ]
+          },
+          {
+            "id": "platform_badges",
+            "type": "centered_row",
+            "content": [
+              "iOS",
+              "Android",
+              "Browser \u2014 no install needed"
+            ]
+          },
+          {
+            "id": "open_source",
+            "type": "dark_callout",
+            "headline": "We show our work.",
+            "body": "Sublemonable is open source. The encryption, the server, the apps \u2014 all of it auditable. Trust shouldn't require faith.",
+            "cta": {
+              "text": "View on GitHub",
+              "icon": "github"
+            }
+          },
+          {
+            "id": "footer",
+            "links": [
+              "GitHub",
+              "Security Model",
+              "Privacy Policy",
+              "Self-host"
+            ],
+            "tagline": "Sublemonable. Nothing lasts.",
+            "logo": "lemon slice mark"
+          }
+        ]
+      },
+      "security": {
+        "path": "/security",
+        "style": "Long-form technical page, readable prose",
+        "sections": [
+          "Signal Protocol overview",
+          "Key generation and storage",
+          "What the server stores (and doesn't)",
+          "Screenshot protection by platform",
+          "Tor routing",
+          "Open source and audit history"
+        ]
+      },
+      "download": {
+        "path": "/download",
+        "content": "App store badges + PWA install prompt + self-host instructions"
+      }
+    },
+    "visual_motifs": {
+      "lemon_slice_hero": "Large SVG lemon slice, slow ambient rotation, yellow glow on dark background",
+      "particle_field": "Subtle floating lemon-yellow particles on dark bg \u2014 like citrus oils in light",
+      "message_preview": "Animated mockup phones showing messages burning",
+      "code_reveal": "TypeScript/Go encryption code snippet with syntax highlighting in lemon theme"
+    }
+  },
+  "fable_ui_instructions": {
+    "design_tokens_file": "packages/ui/src/tokens.ts \u2014 export all color, type, spacing tokens",
+    "tailwind_config": "Extend Tailwind with all brand tokens as custom properties",
+    "dark_mode": "Dark only \u2014 no light mode in v1",
+    "font_loading": "Preload Clash Display + Inter + JetBrains Mono via <link rel=preload>",
+    "lemon_slice_svg": "Build as reusable React component with animated segments prop (0-8 filled)",
+    "critical_rules": [
+      "NEVER use white backgrounds \u2014 minimum is #1A1800",
+      "NEVER use blue for any interactive element \u2014 lemon yellow owns interactivity",
+      "Message content is ALWAYS dark bg (#242100) with light text or lemon bg with dark text \u2014 never inverted",
+      "The burn animation must feel satisfying \u2014 not a simple opacity fade",
+      "Screenshot blur must be jarring and instant \u2014 120ms max \u2014 it should feel protective",
+      "Every loading state uses the lemon slice spinner",
+      "Key fingerprints always render in JetBrains Mono",
+      "Compose bar send button is always lemon yellow \u2014 it is the primary action color"
+    ]
+  }
+}
