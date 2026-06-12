@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **Node.js** ≥ 20 and **pnpm** ≥ 9 (`corepack enable`)
-- **Go** ≥ 1.22
+- **Go** ≥ 1.25
 - **PostgreSQL** 16 (or Docker)
 - **Xcode** 15+ with iOS 16 SDK (iOS app only)
 - **Android Studio** Hedgehog+ with SDK 34 (Android app only)

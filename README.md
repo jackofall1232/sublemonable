@@ -53,7 +53,7 @@ Full details in [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
 | Browser | React 18 + Vite, PWA | [`apps/web`](apps/web) |
 | iOS 16+ | SwiftUI + libsignal-client | [`apps/ios`](apps/ios) |
 | Android 8+ | Jetpack Compose + libsignal-client | [`apps/android`](apps/android) |
-| Server | Go 1.22+ · Fiber · PostgreSQL 16 | [`server`](server) |
+| Server | Go 1.25+ · Fiber · PostgreSQL 16 | [`server`](server) |
 
 ## Getting started
 
