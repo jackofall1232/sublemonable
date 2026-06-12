@@ -42,6 +42,8 @@ export function embedWatermarkBits(pixels: Uint8ClampedArray, payload: Uint8Arra
 
 /** Recover an embedded watermark payload, or null if none is present. */
 export function extractWatermarkBits(pixels: Uint8ClampedArray): Uint8Array | null {
+  // Header alone needs 24 bits = 8 pixels (3 channels each) = 32 bytes.
+  if (pixels.length < 32) return null;
   const readBytes = (count: number, startBit: number): Uint8Array => {
     const out = new Uint8Array(count);
     for (let bit = 0; bit < count * 8; bit++) {

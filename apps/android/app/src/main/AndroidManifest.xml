@@ -34,6 +34,10 @@
         <!-- Single-activity app. FLAG_SECURE is applied in onCreate BEFORE
              setContent — every Activity that can render message content must
              do the same (critical rule). -->
+        <!-- The launcher activity must be exported (mandatory since API 31 for
+             any activity with an intent-filter); it exposes no privileged
+             control surface — content sits behind the biometric gate. -->
+        <!-- nosemgrep: java.android.security.exported_activity.exported_activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

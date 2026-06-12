@@ -178,4 +178,9 @@ describe("watermark", () => {
   it("returns null when no watermark is present", () => {
     expect(extractWatermarkBits(new Uint8ClampedArray(64 * 64 * 4))).toBeNull();
   });
+
+  it("returns null on pixel buffers too small to hold a header", () => {
+    expect(extractWatermarkBits(new Uint8ClampedArray(0))).toBeNull();
+    expect(extractWatermarkBits(new Uint8ClampedArray(31))).toBeNull();
+  });
 });
