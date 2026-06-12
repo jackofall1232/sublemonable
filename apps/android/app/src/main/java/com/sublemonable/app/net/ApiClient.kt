@@ -1,0 +1,260 @@
+// Sublemonable — Copyright (C) 2026 Sublemonable contributors
+// Licensed under the GNU Affero General Public License v3.0 or later.
+// See the LICENSE file in the repository root for full license text.
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package com.sublemonable.app.net
+
+import com.sublemonable.app.crypto.KeyStoreManager
+import com.sublemonable.app.crypto.SignalProtocolManager
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.IOException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+/**
+ * REST client for the Sublemonable server (server.api.endpoints).
+ *
+ * Auth model: JWT (15 min) + refresh token (7 days, rotated on every use).
+ * Login is challenge-based — the client signs
+ * "sublemonable-login:<account_id>:<unix_ts>" with its identity key, so the
+ * server never holds a password and never learns anything but a public key.
+ *
+ * Request/response bodies are JSON. Nothing here is ever logged.
+ */
+class ApiClient(
+    private val baseUrl: String,
+    private var client: OkHttpClient,
+    keyStoreManager: KeyStoreManager,
+) {
+
+    private val authPrefs = keyStoreManager.prefs(KeyStoreManager.PREFS_AUTH)
+
+    class ApiException(val code: Int, message: String) : IOException(message)
+
+    data class SessionTokens(val accessToken: String, val refreshToken: String)
+
+    /** Swap the transport (e.g. after toggling Tor). */
+    fun updateClient(newClient: OkHttpClient) {
+        client = newClient
+    }
+
+    // -- token storage (EncryptedSharedPreferences — never plaintext) ---------
+
+    var accountId: String?
+        get() = authPrefs.getString(KEY_ACCOUNT_ID, null)
+        private set(value) {
+            authPrefs.edit().putString(KEY_ACCOUNT_ID, value).apply()
+        }
+
+    val accessToken: String?
+        get() = authPrefs.getString(KEY_ACCESS_TOKEN, null)
+
+    private val refreshToken: String?
+        get() = authPrefs.getString(KEY_REFRESH_TOKEN, null)
+
+    private fun storeTokens(tokens: SessionTokens) {
+        authPrefs.edit()
+            .putString(KEY_ACCESS_TOKEN, tokens.accessToken)
+            .putString(KEY_REFRESH_TOKEN, tokens.refreshToken)
+            .apply()
+    }
+
+    fun clearTokens() {
+        authPrefs.edit().remove(KEY_ACCESS_TOKEN).remove(KEY_REFRESH_TOKEN).apply()
+    }
+
+    // -- endpoints --------------------------------------------------------------
+
+    /**
+     * POST /api/v1/register — creates the account. The server receives ONLY
+     * public keys; it can never learn anything else about this identity.
+     */
+    suspend fun register(
+        identityKeyBase64: String,
+        registrationId: Int,
+        signedPreKey: SignalProtocolManager.SignedPreKeyDto,
+        oneTimePreKeys: List<SignalProtocolManager.OneTimePreKeyDto>,
+    ): String {
+        val body = JSONObject().apply {
+            put("identity_key", identityKeyBase64)
+            put("registration_id", registrationId)
+            put("signed_prekey", signedPreKey.toJson())
+            put("one_time_prekeys", JSONArray().apply {
+                oneTimePreKeys.forEach { put(it.toJson()) }
+            })
+        }
+        val json = execute(post("/api/v1/register", body, authenticated = false))
+        val newAccountId = json.getString("account_id")
+        accountId = newAccountId
+        return newAccountId
+    }
+
+    /**
+     * POST /api/v1/session — authenticates via an Ed25519/XEdDSA-signed,
+     * timestamped challenge: "sublemonable-login:<account_id>:<unix_ts>".
+     * The timestamp bounds replay; the server validates a small clock skew.
+     */
+    suspend fun createSession(signChallenge: (String) -> String): SessionTokens {
+        val id = accountId ?: throw ApiException(0, "Not registered")
+        val unixTs = System.currentTimeMillis() / 1000L
+        val challenge = loginChallenge(id, unixTs)
+        val body = JSONObject().apply {
+            put("account_id", id)
+            put("timestamp", unixTs)
+            put("signature", signChallenge(challenge))
+        }
+        val json = execute(post("/api/v1/session", body, authenticated = false))
+        return parseTokens(json).also(::storeTokens)
+    }
+
+    /**
+     * POST /api/v1/session/refresh — refresh tokens are single-use and
+     * rotated on every call (critical rule: ALWAYS rotate refresh tokens).
+     */
+    suspend fun refreshSession(): SessionTokens {
+        val current = refreshToken ?: throw ApiException(401, "No refresh token")
+        val body = JSONObject().put("refresh_token", current)
+        val json = execute(post("/api/v1/session/refresh", body, authenticated = false))
+        return parseTokens(json).also(::storeTokens)
+    }
+
+    /** DELETE /api/v1/session — logout, invalidates both tokens. */
+    suspend fun deleteSession() {
+        try {
+            execute(request("/api/v1/session").delete().build())
+        } finally {
+            clearTokens()
+        }
+    }
+
+    /** GET /api/v1/users/:id/prekey — fetch a one-time prekey bundle for X3DH. */
+    suspend fun fetchPreKeyBundle(userId: String): SignalProtocolManager.PreKeyBundleDto {
+        val json = execute(request("/api/v1/users/$userId/prekey").get().build())
+        return SignalProtocolManager.PreKeyBundleDto(
+            registrationId = json.getInt("registration_id"),
+            deviceId = json.optInt("device_id", 1),
+            identityKeyBase64 = json.getString("identity_key"),
+            signedPreKeyId = json.getInt("signed_prekey_id"),
+            signedPreKeyBase64 = json.getString("signed_prekey"),
+            signedPreKeySignatureBase64 = json.getString("signed_prekey_signature"),
+            preKeyId = if (json.isNull("prekey_id")) null else json.getInt("prekey_id"),
+            preKeyBase64 = if (json.isNull("prekey")) null else json.getString("prekey"),
+        )
+    }
+
+    /** POST /api/v1/prekeys — upload a fresh batch of one-time prekeys. */
+    suspend fun uploadPreKeys(
+        oneTimePreKeys: List<SignalProtocolManager.OneTimePreKeyDto>,
+        signedPreKey: SignalProtocolManager.SignedPreKeyDto? = null,
+    ) {
+        val body = JSONObject().apply {
+            put("one_time_prekeys", JSONArray().apply {
+                oneTimePreKeys.forEach { put(it.toJson()) }
+            })
+            signedPreKey?.let { put("signed_prekey", it.toJson()) }
+        }
+        execute(post("/api/v1/prekeys", body))
+    }
+
+    /** GET /api/v1/prekeys/count — server-side prekey stock. */
+    suspend fun preKeyCount(): Int {
+        val json = execute(request("/api/v1/prekeys/count").get().build())
+        return json.getInt("count")
+    }
+
+    /** DELETE /api/v1/account — full, irreversible purge of all server data. */
+    suspend fun deleteAccount() {
+        try {
+            execute(request("/api/v1/account").delete().build())
+        } finally {
+            clearTokens()
+            authPrefs.edit().remove(KEY_ACCOUNT_ID).apply()
+        }
+    }
+
+    // -- plumbing -------------------------------------------------------------------
+
+    private fun parseTokens(json: JSONObject) = SessionTokens(
+        accessToken = json.getString("token"),
+        refreshToken = json.getString("refresh_token"),
+    )
+
+    private fun request(path: String, authenticated: Boolean = true): Request.Builder {
+        val builder = Request.Builder().url(baseUrl.trimEnd('/') + path)
+        if (authenticated) {
+            accessToken?.let { builder.header("Authorization", "Bearer $it") }
+        }
+        return builder
+    }
+
+    private fun post(path: String, body: JSONObject, authenticated: Boolean = true): Request =
+        request(path, authenticated)
+            .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+
+    private suspend fun execute(req: Request): JSONObject =
+        suspendCancellableCoroutine { continuation ->
+            val call = client.newCall(req)
+            continuation.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (continuation.isActive) continuation.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        val text = it.body?.string().orEmpty()
+                        if (!it.isSuccessful) {
+                            // Error detail only — never request/response bodies
+                            // that could contain user data.
+                            if (continuation.isActive) {
+                                continuation.resumeWithException(
+                                    ApiException(it.code, "HTTP ${it.code}"),
+                                )
+                            }
+                            return
+                        }
+                        val json = if (text.isBlank()) JSONObject() else JSONObject(text)
+                        if (continuation.isActive) continuation.resume(json)
+                    }
+                }
+            })
+        }
+
+    private fun SignalProtocolManager.SignedPreKeyDto.toJson() = JSONObject().apply {
+        put("id", id)
+        put("public_key", publicKeyBase64)
+        put("signature", signatureBase64)
+        put("created_at", timestampMs)
+    }
+
+    private fun SignalProtocolManager.OneTimePreKeyDto.toJson() = JSONObject().apply {
+        put("id", id)
+        put("public_key", publicKeyBase64)
+    }
+
+    companion object {
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        private const val KEY_ACCOUNT_ID = "account_id"
+        private const val KEY_ACCESS_TOKEN = "access_token"
+        private const val KEY_REFRESH_TOKEN = "refresh_token"
+
+        /**
+         * The login challenge string. Pure function — covered by unit tests
+         * to keep the client byte-compatible with the server's verifier.
+         */
+        fun loginChallenge(accountId: String, unixTs: Long): String =
+            "sublemonable-login:$accountId:$unixTs"
+    }
+}

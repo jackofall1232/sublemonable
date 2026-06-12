@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sublemonable — Copyright (C) 2026 Sublemonable contributors
+  Licensed under the GNU Affero General Public License v3.0 or later.
+  See the LICENSE file in the repository root for full license text.
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- The ONLY permissions this app requests. No contacts, no storage,
+         no location, no camera (QR display only — scanning is out of v1 scope). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
+    <!-- Required on Android 11+ to detect whether Orbot (Tor) is installed. -->
+    <queries>
+        <package android:name="org.torproject.android" />
+    </queries>
+
+    <application
+        android:name=".SublemonableApp"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Sublemonable"
+        tools:targetApi="34">
+
+        <!-- Single-activity app. FLAG_SECURE is applied in onCreate BEFORE
+             setContent — every Activity that can render message content must
+             do the same (critical rule). -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.Sublemonable">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

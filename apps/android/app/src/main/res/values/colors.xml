@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sublemonable — Copyright (C) 2026 Sublemonable contributors
+  Licensed under the GNU Affero General Public License v3.0 or later.
+  See the LICENSE file in the repository root for full license text.
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+<resources>
+    <color name="background_primary">#0D0C00</color>
+    <color name="background_secondary">#1A1800</color>
+    <color name="lemon">#F5E642</color>
+    <color name="text_on_lemon">#0D0C00</color>
+</resources>

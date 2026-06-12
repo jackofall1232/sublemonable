@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sublemonable — Copyright (C) 2026 Sublemonable contributors
+  Licensed under the GNU Affero General Public License v3.0 or later.
+  See the LICENSE file in the repository root for full license text.
+  SPDX-License-Identifier: AGPL-3.0-only
+
+  Adaptive launcher foreground: lemon slice mark on the dark rind background
+  (background colour supplied by ic_launcher.xml). Safe zone is the centre
+  66dp of the 108dp canvas.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- rind ring -->
+    <path
+        android:fillColor="#F5E642"
+        android:fillType="evenOdd"
+        android:pathData="M54,24 A30,30 0 1,1 53.99,24 Z M54,29 A25,25 0 1,0 54.01,29 Z" />
+    <!-- 8 pulp wedges, drawn as 4 crossing bars -->
+    <path
+        android:fillColor="#F5E642"
+        android:pathData="M52.6,31 L55.4,31 L55.4,77 L52.6,77 Z" />
+    <path
+        android:fillColor="#F5E642"
+        android:pathData="M31,52.6 L77,52.6 L77,55.4 L31,55.4 Z" />
+    <path
+        android:fillColor="#F5E642"
+        android:pathData="M37.7,39.7 L39.7,37.7 L70.3,68.3 L68.3,70.3 Z" />
+    <path
+        android:fillColor="#F5E642"
+        android:pathData="M68.3,37.7 L70.3,39.7 L39.7,70.3 L37.7,68.3 Z" />
+    <!-- centre pip -->
+    <path
+        android:fillColor="#F5E642"
+        android:pathData="M54,50.5 A3.5,3.5 0 1,1 53.99,50.5 Z" />
+</vector>
