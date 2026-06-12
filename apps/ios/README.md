@@ -55,17 +55,22 @@ free-function signatures occasionally change between libsignal releases.
 ## Certificate pin — self-hosters MUST replace this
 
 `Sources/Networking/PinnedSessionDelegate.swift` ships with a **placeholder**
-SHA-256 pin that rejects every server. Compute the pin of your deployment's
-TLS certificate and replace it:
+SPKI pin that rejects every server. Compute the SPKI (public key) pin of your
+deployment's TLS certificate and replace it — the value is identical to the
+one Android's `CertificatePinning.kt` uses, in OkHttp's `sha256/<base64>`
+format:
 
 ```sh
 openssl s_client -connect your.server:443 < /dev/null 2>/dev/null \
-  | openssl x509 -outform DER | openssl dgst -sha256 -hex
+  | openssl x509 -pubkey -noout \
+  | openssl pkey -pubin -outform DER \
+  | openssl dgst -sha256 -binary | base64
 ```
 
 Also point `APIClient.defaultBaseURL` and `WebSocketClient.defaultURL` at your
-server. Keep your previous certificate's hash as a second pin while rotating
-certificates, ship the update, then drop the old pin. TLS 1.3 is the enforced
+server. SPKI pinning survives certificate renewals that keep the same key
+pair; add your backup key's pin as a second entry before rotating key pairs,
+ship the update, then drop the old pin. TLS 1.3 is the enforced
 minimum, and the same pin is applied to both the REST client (URLSession) and
 the WebSocket (Starscream).
 

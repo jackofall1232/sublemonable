@@ -8,40 +8,44 @@ import Security
 import CryptoKit
 
 /// Certificate pinning shared by the REST client (URLSession) and the
-/// WebSocket client (Starscream). The server's leaf certificate must hash
-/// (SHA-256 over the DER encoding) to one of the pinned values AFTER the
-/// system has validated the chain — pinning narrows trust, it never widens it.
+/// WebSocket client (Starscream). Pins are SHA-256 over the leaf
+/// certificate's SubjectPublicKeyInfo (SPKI) — the same `sha256/<base64>`
+/// format OkHttp uses on Android — checked AFTER the system has validated
+/// the chain. SPKI pinning survives certificate renewals that keep the same
+/// key pair; pinning narrows trust, it never widens it.
 public enum CertificatePin {
     // =========================================================================
     // SELF-HOSTERS: REPLACE THIS PIN.
     //
     // This is a PLACEHOLDER value and will reject every real server. Compute
-    // the pin for your deployment's certificate with:
+    // the SPKI pin for your deployment's certificate with:
     //
     //   openssl s_client -connect your.server:443 < /dev/null 2>/dev/null \
-    //     | openssl x509 -outform DER | openssl dgst -sha256 -hex
+    //     | openssl x509 -pubkey -noout \
+    //     | openssl pkey -pubin -outform DER \
+    //     | openssl dgst -sha256 -binary | base64
     //
-    // Add your previous/backup certificate's hash as a second entry before
-    // rotating certificates, ship an update, then remove the old pin.
+    // Use the identical value in the Android client's CertificatePinning.kt.
+    // Add your backup key's pin as a second entry before rotating key pairs,
+    // ship an update, then remove the old pin.
     // =========================================================================
-    public static let pinnedSHA256Hashes: Set<String> = [
-        "0000000000000000000000000000000000000000000000000000000000000000" // PLACEHOLDER — replace before deploying
+    public static let pinnedSPKISHA256: Set<String> = [
+        "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" // PLACEHOLDER — replace before deploying
     ]
 
     /// Evaluates a server trust object: full system chain validation first,
-    /// then leaf-certificate SHA-256 pin comparison.
+    /// then leaf SPKI pin comparison.
     public static func evaluate(trust: SecTrust) -> Bool {
         // 1. Standard chain validation (expiry, hostname, CA path).
         var error: CFError?
         guard SecTrustEvaluateWithError(trust, &error) else { return false }
 
-        // 2. Leaf certificate pin.
-        guard let leaf = leafCertificate(of: trust) else { return false }
-        let der = SecCertificateCopyData(leaf) as Data
-        let hash = SHA256.hash(data: der)
-            .map { String(format: "%02x", $0) }
-            .joined()
-        return pinnedSHA256Hashes.contains(hash)
+        // 2. Leaf SPKI pin.
+        guard let leaf = leafCertificate(of: trust),
+              let spki = subjectPublicKeyInfo(of: leaf) else { return false }
+        let digest = Data(SHA256.hash(data: spki))
+        let pin = "sha256/" + digest.base64EncodedString()
+        return pinnedSPKISHA256.contains(pin)
     }
 
     private static func leafCertificate(of trust: SecTrust) -> SecCertificate? {
@@ -50,6 +54,47 @@ public enum CertificatePin {
             return chain?.first
         } else {
             return SecTrustGetCertificateAtIndex(trust, 0)
+        }
+    }
+
+    /// Reconstructs the DER SubjectPublicKeyInfo from the certificate's key.
+    /// Security.framework only exposes the raw key bytes
+    /// (`SecKeyCopyExternalRepresentation`), so the ASN.1 SPKI header for the
+    /// key's type/size is prepended — the standard approach (cf. TrustKit).
+    private static func subjectPublicKeyInfo(of certificate: SecCertificate) -> Data? {
+        guard let key = SecCertificateCopyKey(certificate),
+              let attributes = SecKeyCopyAttributes(key) as? [String: Any],
+              let keyType = attributes[kSecAttrKeyType as String] as? String,
+              let keySize = attributes[kSecAttrKeySizeInBits as String] as? Int,
+              let rawKey = SecKeyCopyExternalRepresentation(key, nil) as Data?
+        else { return nil }
+
+        guard let header = spkiHeader(keyType: keyType, keySize: keySize) else { return nil }
+        return header + rawKey
+    }
+
+    private static func spkiHeader(keyType: String, keySize: Int) -> Data? {
+        switch (keyType, keySize) {
+        case (kSecAttrKeyTypeRSA as String, 2048):
+            return Data([0x30, 0x82, 0x01, 0x22, 0x30, 0x0d, 0x06, 0x09,
+                         0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
+                         0x01, 0x05, 0x00, 0x03, 0x82, 0x01, 0x0f, 0x00])
+        case (kSecAttrKeyTypeRSA as String, 4096):
+            return Data([0x30, 0x82, 0x02, 0x22, 0x30, 0x0d, 0x06, 0x09,
+                         0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
+                         0x01, 0x05, 0x00, 0x03, 0x82, 0x02, 0x0f, 0x00])
+        case (kSecAttrKeyTypeECSECPrimeRandom as String, 256):
+            return Data([0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86,
+                         0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
+                         0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03,
+                         0x42, 0x00])
+        case (kSecAttrKeyTypeECSECPrimeRandom as String, 384):
+            return Data([0x30, 0x76, 0x30, 0x10, 0x06, 0x07, 0x2a, 0x86,
+                         0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x05, 0x2b,
+                         0x81, 0x04, 0x00, 0x22, 0x03, 0x62, 0x00])
+        default:
+            // Unsupported key type/size — fail closed.
+            return nil
         }
     }
 }

@@ -21,7 +21,9 @@ public struct SettingsView: View {
 
     @State private var showFingerprint = false
     @State private var confirmDelete = false
-    @State private var jailbreakResult = JailbreakDetector.check()
+    // Populated in .task — JailbreakDetector.check() touches main-thread-only
+    // API (UIApplication.canOpenURL) and must not run during view init.
+    @State private var jailbreakResult = JailbreakDetector.Result(suspicious: false, reasons: [])
 
     public init(orbot: OrbotIntegration,
                 localFingerprint: String,
@@ -51,6 +53,9 @@ public struct SettingsView: View {
             .background(Color.backgroundPrimary)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .task { @MainActor in
+                jailbreakResult = JailbreakDetector.check()
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done", action: onDismiss)

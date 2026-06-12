@@ -303,6 +303,10 @@ public struct PreKeyBundleResponse: Decodable {
         }
     }
 
+    /// The zero-knowledge server stores nothing device-identifying and does
+    /// not issue registration IDs, so the field is absent from the bundle
+    /// JSON. A fixed value satisfies libsignal's addressing in this
+    /// one-device-per-account design.
     public let registrationID: Int
     public let identityKey: String
     public let signedPreKey: SignedPreKey
@@ -315,6 +319,14 @@ public struct PreKeyBundleResponse: Decodable {
         case identityKey = "identity_key"
         case signedPreKey = "signed_prekey"
         case oneTimePreKey = "one_time_prekey"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        registrationID = try container.decodeIfPresent(Int.self, forKey: .registrationID) ?? 1
+        identityKey = try container.decode(String.self, forKey: .identityKey)
+        signedPreKey = try container.decode(SignedPreKey.self, forKey: .signedPreKey)
+        oneTimePreKey = try container.decodeIfPresent(OneTimePreKey.self, forKey: .oneTimePreKey)
     }
 
     public init(registrationID: Int,

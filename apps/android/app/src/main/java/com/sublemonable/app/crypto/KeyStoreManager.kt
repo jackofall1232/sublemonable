@@ -22,11 +22,19 @@ import androidx.security.crypto.MasterKey
 class KeyStoreManager(private val context: Context) {
 
     private val masterKey: MasterKey by lazy {
-        MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            // Prefer StrongBox when present; falls back gracefully otherwise.
-            .setRequestStrongBoxBacked(true)
-            .build()
+        // Prefer StrongBox where the hardware has it. Key generation throws
+        // StrongBoxUnavailableException on devices without it (most of them),
+        // so fall back to the standard hardware-backed Keystore explicitly.
+        try {
+            MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .setRequestStrongBoxBacked(true)
+                .build()
+        } catch (e: Exception) {
+            MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+        }
     }
 
     private val cache = mutableMapOf<String, SharedPreferences>()

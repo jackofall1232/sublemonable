@@ -84,7 +84,12 @@ object RootDetection {
 
         ROOT_PACKAGES.forEach { pkg ->
             try {
-                context.packageManager.getPackageInfo(pkg, 0)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.packageManager.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0))
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.packageManager.getPackageInfo(pkg, 0)
+                }
                 indicators.add("package:$pkg")
             } catch (e: PackageManager.NameNotFoundException) {
                 // not installed — good

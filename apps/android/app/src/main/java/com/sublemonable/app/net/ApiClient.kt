@@ -137,18 +137,28 @@ class ApiClient(
         }
     }
 
-    /** GET /api/v1/users/:id/prekey — fetch a one-time prekey bundle for X3DH. */
+    /**
+     * GET /api/v1/users/:id/prekey — fetch a one-time prekey bundle for X3DH.
+     * Wire shape (server handlers.go GetPrekeyBundle): identity_key at the top
+     * level, nested signed_prekey {id, public_key, signature}, and a nullable
+     * nested one_time_prekey {id, public_key}.
+     */
     suspend fun fetchPreKeyBundle(userId: String): SignalProtocolManager.PreKeyBundleDto {
         val json = execute(request("/api/v1/users/$userId/prekey").get().build())
+        val signedPreKey = json.getJSONObject("signed_prekey")
+        val oneTimePreKey = if (json.isNull("one_time_prekey")) null else json.getJSONObject("one_time_prekey")
         return SignalProtocolManager.PreKeyBundleDto(
-            registrationId = json.getInt("registration_id"),
-            deviceId = json.optInt("device_id", 1),
+            // The zero-knowledge server doesn't issue registration IDs (it
+            // stores nothing device-identifying); a fixed value satisfies
+            // libsignal's addressing in this one-device-per-account design.
+            registrationId = 1,
+            deviceId = 1,
             identityKeyBase64 = json.getString("identity_key"),
-            signedPreKeyId = json.getInt("signed_prekey_id"),
-            signedPreKeyBase64 = json.getString("signed_prekey"),
-            signedPreKeySignatureBase64 = json.getString("signed_prekey_signature"),
-            preKeyId = if (json.isNull("prekey_id")) null else json.getInt("prekey_id"),
-            preKeyBase64 = if (json.isNull("prekey")) null else json.getString("prekey"),
+            signedPreKeyId = signedPreKey.getInt("id"),
+            signedPreKeyBase64 = signedPreKey.getString("public_key"),
+            signedPreKeySignatureBase64 = signedPreKey.getString("signature"),
+            preKeyId = oneTimePreKey?.getInt("id"),
+            preKeyBase64 = oneTimePreKey?.getString("public_key"),
         )
     }
 
@@ -185,7 +195,7 @@ class ApiClient(
     // -- plumbing -------------------------------------------------------------------
 
     private fun parseTokens(json: JSONObject) = SessionTokens(
-        accessToken = json.getString("token"),
+        accessToken = json.getString("access_token"),
         refreshToken = json.getString("refresh_token"),
     )
 

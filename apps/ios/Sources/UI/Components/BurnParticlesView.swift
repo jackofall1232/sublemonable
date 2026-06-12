@@ -21,13 +21,18 @@ public struct BurnParticlesView: View {
     }
 
     public let duration: TimeInterval
-    private let startDate = Date()
-    private let particles: [Particle]
+    // SwiftUI recreates views freely; @State keeps the particle field and the
+    // animation start anchored across re-inits, and the seeded generator makes
+    // the field deterministic for a given message — no flicker, no restart.
+    @State private var startDate = Date()
+    @State private var particles: [Particle]
 
-    public init(duration: TimeInterval = Motion.dramatic, particleCount: Int = 90) {
+    public init(duration: TimeInterval = Motion.dramatic,
+                particleCount: Int = 90,
+                seed: UInt64 = 0x5EED_1E40) {
         self.duration = duration
-        var generator = SystemRandomNumberGenerator()
-        self.particles = (0..<particleCount).map { _ in
+        var generator = SplitMix64(seed: seed)
+        _particles = State(initialValue: (0..<particleCount).map { _ in
             Particle(
                 originX: CGFloat.random(in: 0...1, using: &generator),
                 originY: CGFloat.random(in: 0.15...1, using: &generator),
@@ -37,7 +42,7 @@ public struct BurnParticlesView: View {
                 delay: Double.random(in: 0...0.35, using: &generator),
                 hue: Int.random(in: 0...2, using: &generator)
             )
-        }
+        })
     }
 
     public var body: some View {
@@ -77,5 +82,22 @@ public struct BurnParticlesView: View {
         case 1: return .burnOrange
         default: return .burnRed
         }
+    }
+}
+
+/// Tiny deterministic PRNG (SplitMix64) — stable particle fields per seed.
+struct SplitMix64: RandomNumberGenerator {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        state = seed
+    }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
     }
 }

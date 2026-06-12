@@ -42,8 +42,9 @@ import com.sublemonable.app.ui.theme.TextSecondary
 /**
  * Minimal "add contact" dialog. Discovery is QR or direct link
  * (features.accounts.discovery) — in-app QR SCANNING ships later, so v1
- * accepts the contact's account ID (the UUID inside their QR/link) pasted
- * directly, plus a local display name.
+ * accepts whatever the contact shares, pasted directly: the JSON exchange
+ * payload other clients embed in their QR codes, an invite link, or the raw
+ * account UUID — plus a local display name.
  */
 @Composable
 fun NewChatDialog(
@@ -52,6 +53,7 @@ fun NewChatDialog(
 ) {
     var contactId by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
+    var parseError by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Column(
@@ -74,10 +76,20 @@ fun NewChatDialog(
 
             DialogField(
                 value = contactId,
-                onValueChange = { contactId = it.trim() },
-                placeholder = "Contact ID",
+                onValueChange = {
+                    contactId = it.trim()
+                    parseError = false
+                },
+                placeholder = "Contact ID, invite link, or QR payload",
                 mono = true,
             )
+            if (parseError) {
+                Text(
+                    text = "Couldn't find a contact ID in that — paste the QR payload, link, or UUID.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             DialogField(
                 value = displayName,
                 onValueChange = { displayName = it },
@@ -93,7 +105,14 @@ fun NewChatDialog(
                     Text("Cancel", color = TextSecondary)
                 }
                 Button(
-                    onClick = { onAdd(contactId, displayName.ifBlank { "Unnamed contact" }) },
+                    onClick = {
+                        val parsed = parseContactInput(contactId)
+                        if (parsed == null) {
+                            parseError = true
+                        } else {
+                            onAdd(parsed, displayName.ifBlank { "Unnamed contact" })
+                        }
+                    },
                     enabled = contactId.isNotBlank(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Lemon,
@@ -106,6 +125,31 @@ fun NewChatDialog(
         }
     }
 }
+
+/**
+ * Extracts the contact's account UUID from whatever was pasted:
+ * - the JSON ContactExchangePayload other clients put in QR codes
+ *   ({"version":"1","account_id":"<uuid>","identity_key":"<base64>"}),
+ * - an invite link or any text containing a UUID,
+ * - or the raw UUID itself.
+ * Returns null when no UUID can be found. Pure — covered by unit tests.
+ */
+fun parseContactInput(input: String): String? {
+    val trimmed = input.trim()
+    if (trimmed.startsWith("{")) {
+        try {
+            val accountId = org.json.JSONObject(trimmed).optString("account_id")
+            if (UUID_REGEX.matches(accountId)) return accountId.lowercase()
+        } catch (_: org.json.JSONException) {
+            // Fall through to the generic UUID search.
+        }
+    }
+    return UUID_REGEX.find(trimmed)?.value?.lowercase()
+}
+
+private val UUID_REGEX = Regex(
+    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+)
 
 @Composable
 private fun DialogField(
