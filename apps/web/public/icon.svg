@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Sublemonable lemon slice mark — AGPL-3.0-only -->
+  <rect width="64" height="64" rx="14" fill="#0D0C00"/>
+  <circle cx="32" cy="32" r="24" fill="none" stroke="#D4C200" stroke-width="2.2"/>
+  <g fill="#F5E642">
+    <path d="M32 32 L33.5 13 A19.5 19.5 0 0 1 45 17.5 L34 30 Z"/>
+    <path d="M32 32 L46.5 19 A19.5 19.5 0 0 1 51 30.5 L34.5 31.5 Z"/>
+    <path d="M32 32 L51 33.5 A19.5 19.5 0 0 1 46.5 45 L34 34 Z"/>
+    <path d="M32 32 L45 46.5 A19.5 19.5 0 0 1 33.5 51 L32.5 34.5 Z"/>
+    <path d="M32 32 L30.5 51 A19.5 19.5 0 0 1 19 46.5 L30 34 Z"/>
+    <path d="M32 32 L17.5 45 A19.5 19.5 0 0 1 13 33.5 L29.5 32.5 Z"/>
+    <path d="M32 32 L13 30.5 A19.5 19.5 0 0 1 17.5 19 L30 30 Z"/>
+    <path d="M32 32 L19 17.5 A19.5 19.5 0 0 1 30.5 13 L31.5 29.5 Z"/>
+  </g>
+  <circle cx="32" cy="32" r="2.8" fill="#E8B800"/>
+</svg>

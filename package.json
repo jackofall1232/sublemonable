@@ -1,0 +1,24 @@
+{
+  "name": "sublemonable",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Zero-knowledge, end-to-end encrypted ephemeral messaging app for browser, iOS, and Android",
+  "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' build && pnpm --filter @sublemonable/web build && pnpm --filter @sublemonable/website build",
+    "build:packages": "pnpm -r --filter './packages/**' build",
+    "dev:web": "pnpm --filter @sublemonable/web dev",
+    "dev:website": "pnpm --filter @sublemonable/website dev",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "typescript": "^5.5.4"
+  }
+}

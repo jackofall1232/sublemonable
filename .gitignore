@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Builds
+dist/
+build/
+out/
+.next/
+*.tsbuildinfo
+
+# Go
+server/bin/
+server/vendor/
+
+# iOS
+apps/ios/DerivedData/
+apps/ios/*.xcodeproj/xcuserdata/
+apps/ios/.build/
+apps/ios/Pods/
+
+# Android
+apps/android/.gradle/
+apps/android/**/build/
+apps/android/local.properties
+apps/android/.idea/
+*.keystore
+
+# Secrets — never commit keys
+*.pem
+*.key
+!**/testdata/**/*.pem
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+*.swp
+.vscode/
+coverage/

@@ -1,0 +1,36 @@
+{
+  "name": "@sublemonable/web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sublemonable browser client — E2EE ephemeral messaging PWA",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "prettier --check src"
+  },
+  "dependencies": {
+    "@sublemonable/crypto": "workspace:*",
+    "@sublemonable/protocol": "workspace:*",
+    "@sublemonable/ui": "workspace:*",
+    "idb": "^8.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.41",
+    "tailwindcss": "^3.4.10",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2",
+    "vitest": "^2.0.5"
+  }
+}

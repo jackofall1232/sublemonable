@@ -1,0 +1,17 @@
+{
+  "name": "Sublemonable",
+  "short_name": "Sublemonable",
+  "description": "End-to-end encrypted messaging that disappears. No logs. No screenshots. No trace.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0D0C00",
+  "theme_color": "#0D0C00",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

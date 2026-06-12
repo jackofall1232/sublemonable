@@ -1,0 +1,32 @@
+{
+  "name": "@sublemonable/crypto",
+  "version": "1.0.0",
+  "description": "Crypto primitives for the Sublemonable web client — wraps libsodium.js",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "prettier --check src"
+  },
+  "devDependencies": {
+    "@types/libsodium-wrappers-sumo": "^0.8.2",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  },
+  "dependencies": {
+    "libsodium-wrappers-sumo": "^0.8.4"
+  }
+}
