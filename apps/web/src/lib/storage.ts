@@ -50,10 +50,16 @@ function frameVault(salt: Uint8Array, blob: Uint8Array): Uint8Array {
 }
 
 function unframeVault(framed: Uint8Array): VaultRecord {
+  if (framed.length < 4) {
+    throw new Error("Invalid framed vault: too short");
+  }
   const saltLen = new DataView(framed.buffer, framed.byteOffset, framed.byteLength).getUint32(
     0,
     false,
   );
+  if (framed.length < 4 + saltLen) {
+    throw new Error("Invalid framed vault: salt length mismatch");
+  }
   const salt = framed.slice(4, 4 + saltLen);
   const blob = framed.slice(4 + saltLen);
   return { salt, blob };

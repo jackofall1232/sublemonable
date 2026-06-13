@@ -128,17 +128,17 @@ pub async fn set_proxy_config(app: AppHandle, config: Option<ProxyConfig>) -> Re
 /// this to show "Tor connected" / "Tor unavailable".
 #[tauri::command]
 pub async fn check_tor_connectivity(app: AppHandle) -> Result<bool, String> {
-    let configured = read_config(&app)?;
-    let (host, port) = match configured {
-        Some(cfg) => (cfg.host.clone(), cfg.port),
-        None => (TOR_DAEMON.0.to_string(), TOR_DAEMON.1),
-    };
-    let reachable = tokio::task::spawn_blocking(move || {
-        tcp_reachable(&host, port, CONNECTIVITY_TIMEOUT)
+    // Read config and probe the socket on a blocking thread so neither the
+    // synchronous file read nor the TCP connect stalls the async executor.
+    tokio::task::spawn_blocking(move || {
+        let (host, port) = match read_config(&app)? {
+            Some(cfg) => (cfg.host.clone(), cfg.port),
+            None => (TOR_DAEMON.0.to_string(), TOR_DAEMON.1),
+        };
+        Ok::<bool, String>(tcp_reachable(&host, port, CONNECTIVITY_TIMEOUT))
     })
     .await
-    .map_err(|e| e.to_string())?;
-    Ok(reachable)
+    .map_err(|e| e.to_string())?
 }
 
 /// Tor-first startup probe. Called once after the window is created. Probes the

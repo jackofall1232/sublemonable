@@ -67,12 +67,24 @@ fn file_store(blob: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(&path, blob).map_err(|e| e.to_string())?;
-    // Best-effort tighten permissions to user-only (0600).
+    // Create with 0600 atomically on Unix so the vault is never briefly
+    // world/group-readable between creation and a follow-up chmod.
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| e.to_string())?;
+        file.write_all(blob).map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&path, blob).map_err(|e| e.to_string())?;
     }
     tracing::debug!("vault stored via file fallback");
     Ok(())
