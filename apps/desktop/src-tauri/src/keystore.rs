@@ -63,29 +63,52 @@ fn attributes() -> HashMap<&'static str, &'static str> {
 // ── File fallback (only used when Secret Service is unavailable) ──────────────
 
 fn file_store(blob: &[u8]) -> Result<(), String> {
+    use std::io::Write;
     let path = fallback_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    // Create with 0600 atomically on Unix so the vault is never briefly
-    // world/group-readable between creation and a follow-up chmod.
+    // Write to a sibling temp file, then atomically rename over the target.
+    // This avoids two failure modes at once:
+    //   • permissions race — the temp file is created with mode 0600, so the
+    //     vault is never briefly world/group-readable;
+    //   • torn write — a crash or power loss mid-write cannot corrupt the live
+    //     vault, since rename is atomic and the old file stays intact until then.
+    let tmp = path.with_extension("bin.tmp");
+
     #[cfg(unix)]
-    {
-        use std::io::Write;
+    let mut file = {
         use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
+        std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .mode(0o600)
-            .open(&path)
-            .map_err(|e| e.to_string())?;
-        file.write_all(blob).map_err(|e| e.to_string())?;
-    }
+            .open(&tmp)
+            .map_err(|e| e.to_string())?
+    };
     #[cfg(not(unix))]
-    {
-        std::fs::write(&path, blob).map_err(|e| e.to_string())?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&tmp)
+        .map_err(|e| e.to_string())?;
+
+    let write_result = file
+        .write_all(blob)
+        .and_then(|()| file.sync_all())
+        .map_err(|e| e.to_string());
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
+    drop(file);
+
+    std::fs::rename(&tmp, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })?;
     tracing::debug!("vault stored via file fallback");
     Ok(())
 }
@@ -187,7 +210,12 @@ pub async fn store_vault(blob: Vec<u8>) -> Result<(), String> {
 #[tauri::command]
 pub async fn load_vault() -> Result<Option<Vec<u8>>, String> {
     tokio::task::spawn_blocking(|| match ss_load() {
-        Ok(found) => Ok(found),
+        Ok(Some(blob)) => Ok(Some(blob)),
+        // Secret Service reachable but empty: the vault may have been written to
+        // the file fallback in an earlier session where no daemon was running
+        // (e.g. the keyring only started later). Consult the file before
+        // concluding there is no account, so the user can still unlock.
+        Ok(None) => file_load(),
         Err(e) => {
             tracing::debug!(error = %e, "Secret Service load failed; using file fallback");
             file_load()

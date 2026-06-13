@@ -414,6 +414,7 @@
             "values": [
               "ios",
               "android",
+              "linux",
               "browser"
             ],
             "server_stores": "Platform string per active session — treated as non-sensitive session metadata",
@@ -1262,6 +1263,7 @@
                 "content": [
                   "iOS",
                   "Android",
+                  "Linux (.deb · .AppImage)",
                   "Browser — no install needed"
                 ]
               },

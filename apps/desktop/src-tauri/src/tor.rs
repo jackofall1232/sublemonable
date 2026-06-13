@@ -146,35 +146,47 @@ pub async fn check_tor_connectivity(app: AppHandle) -> Result<bool, String> {
 /// `mode = "tor"`, otherwise announces `mode = "clearnet"`. Never fails the
 /// launch — connectivity problems are surfaced through the event, not an error.
 pub async fn detect_and_announce(app: AppHandle) {
-    let detected = tokio::task::spawn_blocking(|| {
+    let probe_app = app.clone();
+    // (endpoint, reachable, persist_if_reachable)
+    let outcome = tokio::task::spawn_blocking(move || {
+        // Respect a user-configured proxy: probe it, never overwrite it.
+        if let Ok(Some(cfg)) = read_config(&probe_app) {
+            let reachable = tcp_reachable(&cfg.host, cfg.port, PROBE_TIMEOUT);
+            return (Some((cfg.host.clone(), cfg.port)), reachable, false);
+        }
+        // No saved config: probe the well-known Tor endpoints and persist the
+        // first that answers so the frontend can read it back.
         if tcp_reachable(TOR_DAEMON.0, TOR_DAEMON.1, PROBE_TIMEOUT) {
-            Some(TOR_DAEMON)
+            (Some((TOR_DAEMON.0.to_string(), TOR_DAEMON.1)), true, true)
         } else if tcp_reachable(TOR_BROWSER.0, TOR_BROWSER.1, PROBE_TIMEOUT) {
-            Some(TOR_BROWSER)
+            (Some((TOR_BROWSER.0.to_string(), TOR_BROWSER.1)), true, true)
         } else {
-            None
+            (None, false, true)
         }
     })
     .await
-    .unwrap_or(None);
+    .unwrap_or((None, false, true));
 
-    let event = match detected {
-        Some((host, port)) => {
-            // Record the live proxy so the frontend can read it back.
-            if let Err(e) = write_config(&app, Some(&ProxyConfig { host: host.to_string(), port })) {
-                tracing::debug!(error = %e, "could not persist detected proxy config");
+    let event = match outcome {
+        (Some((host, port)), true, persist) => {
+            if persist {
+                if let Err(e) =
+                    write_config(&app, Some(&ProxyConfig { host: host.clone(), port }))
+                {
+                    tracing::debug!(error = %e, "could not persist detected proxy config");
+                }
             }
-            tracing::info!(port, "Tor SOCKS proxy detected — routing Tor-first");
+            tracing::info!(port, "Tor SOCKS proxy reachable — routing Tor-first");
             ConnectionMode {
                 mode: "tor",
-                reason: format!("Local Tor SOCKS proxy reachable on 127.0.0.1:{port}"),
+                reason: format!("Tor SOCKS proxy reachable on {host}:{port}"),
             }
         }
-        None => {
+        _ => {
             let hint = if torsocks_on_path() {
-                "No Tor SOCKS proxy on 9050/9150. torsocks is installed — relaunch via `torsocks sublemonable` for Tor routing."
+                "No Tor SOCKS proxy reachable. torsocks is installed — relaunch via `torsocks sublemonable` for Tor routing."
             } else {
-                "No Tor SOCKS proxy on 9050/9150 and torsocks not found. Running on clearnet."
+                "No Tor SOCKS proxy reachable and torsocks not found. Running on clearnet."
             };
             tracing::warn!("{hint}");
             ConnectionMode { mode: "clearnet", reason: hint.to_string() }

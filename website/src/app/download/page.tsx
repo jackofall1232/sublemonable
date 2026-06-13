@@ -108,6 +108,17 @@ export default function DownloadPage() {
                 Download .AppImage
               </div>
             </a>
+            <a
+              href={`${GITHUB_URL}/releases/latest`}
+              className="w-52 rounded-md border border-line bg-bg-elevated px-5 py-3 text-left transition duration-base ease-brand hover:border-lemon hover:text-lemon"
+            >
+              <div className="font-mono text-[10px] uppercase tracking-wide text-ink-muted">
+                Fedora · RHEL (community)
+              </div>
+              <div className="font-display text-base font-semibold text-ink-primary">
+                Download .rpm
+              </div>
+            </a>
           </div>
           <p className="mt-5 leading-relaxed text-ink-secondary">
             On <span className="text-ink-primary">Wayland</span> (GNOME, KDE Plasma) the desktop app
