@@ -32,7 +32,10 @@ verified, and what remains. It follows the master's `versions.1.5.0.build_order`
   from IndexedDB), and an incorrect sizing policy would silently weaken deniability while appearing
   to work. This is the one place where shipping a partial implementation is worse than none. It
   should be implemented as a fixed-size, padded per-slot blob store with an explicit max, plus an
-  end-to-end unlock test, before being enabled.
+  end-to-end unlock test, before being enabled. **Decision (KDF cost):** the per-slot Argon2id design
+  is kept for maximal isolation; the unlock must run off the main thread. The Web Worker wrapper is
+  in place (`apps/web/src/lib/vaultWorker.ts` + `vault.worker.ts`) and the future unlock flow should
+  call `unlockVaultOffThread`; iOS/Android must run the equivalent on a background queue/coroutine.
 - **Native v1.5 UI** (connection-mode selector, privacy-view rendering, dead-drop QR, second-
   passphrase setup) and **forensic protections** (SQLCipher WAL handling, secure delete, timestamp
   normalization) — platform-specific, and the native projects can't be compiled in this environment.

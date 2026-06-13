@@ -30,6 +30,13 @@
  *
  * This mirrors the VeraCrypt hidden-volume model: providing one passphrase opens
  * one real profile and reveals nothing about whether another exists.
+ *
+ * Performance note: `tryPassphrase` runs Argon2id once PER slot (each slot has
+ * its own salt) — deliberately, for maximal isolation between vaults. That makes
+ * an unlock CPU-heavy (SLOT_COUNT derivations). Callers on the main thread of a
+ * UI MUST run it off-thread (a Web Worker on web; a background queue/coroutine on
+ * iOS/Android) so the unlock never freezes the interface. See
+ * apps/web/src/lib/vaultWorker.ts for the web wrapper.
  */
 
 import { sodium, ready } from "./sodium.js";
