@@ -51,3 +51,40 @@ export {
   decodeWatermarkPayload,
   type WatermarkPayload,
 } from "./watermark.js";
+
+// ── v1.5: the security onion ─────────────────────────────────────────────────
+export {
+  createVaultSlots,
+  addVaultSlot,
+  tryPassphrase,
+  sealSlot,
+  randomSlot,
+  randomBytes,
+  wipe,
+  SLOT_COUNT,
+  WRAPPED_KEY_BYTES,
+  VAULT_KEY_BYTES,
+  type KeySlot,
+  type VaultUnlock,
+  type KeyDeriver,
+} from "./vault.js";
+export { pad, unpad, paddedBlockCount, BLOCK_BYTES } from "./padding.js";
+export {
+  generateDropToken,
+  dropIdFromToken,
+  solveProofOfWork,
+  verifyProofOfWork,
+  hasLeadingZeroBits,
+  DROP_TOKEN_BYTES,
+  DEFAULT_POW_DIFFICULTY,
+  type DropCredentials,
+} from "./deaddrop.js";
+export {
+  generateRelayKeyPair,
+  buildOnion,
+  peelOnion,
+  type RelayKeyPair,
+  type OnionHop,
+  type PeeledLayer,
+} from "./onion.js";
+export { sealTo, openSealed } from "./sealedbox.js";

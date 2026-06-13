@@ -23,7 +23,11 @@ export async function aeadEncrypt(
   const nonce = sodium.randombytes_buf(NONCE_BYTES);
   const cryptoKey = await importAesKey(key, "encrypt");
   const ct = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(nonce), additionalData: associatedData ? toArrayBuffer(associatedData) : undefined },
+    {
+      name: "AES-GCM",
+      iv: toArrayBuffer(nonce),
+      additionalData: associatedData ? toArrayBuffer(associatedData) : undefined,
+    },
     cryptoKey,
     toArrayBuffer(plaintext),
   );
@@ -40,7 +44,11 @@ export async function aeadDecrypt(
   const ct = box.slice(NONCE_BYTES);
   const cryptoKey = await importAesKey(key, "decrypt");
   const pt = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(nonce), additionalData: associatedData ? toArrayBuffer(associatedData) : undefined },
+    {
+      name: "AES-GCM",
+      iv: toArrayBuffer(nonce),
+      additionalData: associatedData ? toArrayBuffer(associatedData) : undefined,
+    },
     cryptoKey,
     toArrayBuffer(ct),
   );

@@ -11,14 +11,23 @@ import {
   decryptKeyStore,
   deriveKeyFromPassword,
   encryptKeyStore,
+  fromBase64,
+  generateDropToken,
   generateIdentityKeyPair,
   generateOneTimePrekeys,
   generateSalt,
   generateSignedPrekey,
+  identityKeyToX25519,
+  openSealed,
+  pad,
   ratchetDecrypt,
   ratchetEncrypt,
   safetyNumber,
+  sealTo,
   signWithIdentity,
+  solveProofOfWork,
+  toBase64,
+  unpad,
   utf8Decode,
   utf8Encode,
   x3dhInitiate,
@@ -26,13 +35,16 @@ import {
   type KeyStore,
 } from "@sublemonable/crypto";
 import {
+  DROP_POW_DIFFICULTY,
   ONE_TIME_PREKEY_BATCH,
   parseEnvelope,
   PROTOCOL_VERSION,
   type MessageEnvelope,
   type ServerEvent,
 } from "@sublemonable/protocol";
+import { DecoyScheduler } from "@sublemonable/relay-client";
 import { create } from "zustand";
+import { useSettings } from "./settings.js";
 import { api } from "./lib/api.js";
 import { b64, unb64 } from "./lib/bytes.js";
 import {
@@ -102,6 +114,11 @@ interface AppState {
   ) => Promise<void>;
   openMessage: (peerId: string, messageId: string) => void;
   finishBurn: (peerId: string, messageId: string) => void;
+  /** Encrypt a message to a contact and deposit it as a dead drop; returns the
+   *  base64 one-time token to share out of band (QR / separate channel). */
+  sendDeadDrop: (peerId: string, text: string) => Promise<string>;
+  /** Redeem a dead drop by token: fetch, decrypt, and surface the message. */
+  redeemDeadDrop: (tokenB64: string) => Promise<void>;
   expireMessage: (peerId: string, messageId: string) => void;
   setActivePeer: (peerId: string | null) => void;
   markVerified: (peerId: string) => Promise<void>;
@@ -146,10 +163,36 @@ export const useApp = create<AppState>((set, get) => {
     return get().accessToken!;
   };
 
+  // Cover-traffic generator. Submits decoy envelopes over the same WebSocket path
+  // as real messages so that, on the wire, sending and idle are indistinguishable.
+  let decoy: DecoyScheduler | null = null;
+  let unsubSettings: (() => void) | null = null;
+
+  const startDecoy = (ws: WsClient, senderId: string): void => {
+    const intensity = useSettings.getState().coverTraffic;
+    decoy = new DecoyScheduler({
+      senderId,
+      submit: (envelope) => ws.send({ type: "message.send", envelope }),
+      intensity,
+    });
+    decoy.start();
+    // React to live cover-traffic changes from Settings.
+    unsubSettings = useSettings.subscribe((s) => decoy?.setIntensity(s.coverTraffic));
+  };
+
+  const stopDecoy = (): void => {
+    decoy?.stop();
+    decoy = null;
+    unsubSettings?.();
+    unsubSettings = null;
+  };
+
   const connect = (): void => {
     const ws = new WsClient(freshToken, handleServerEvent, (wsStatus) => set({ wsStatus }));
     set({ ws });
     void ws.connect();
+    const accountId = get().accountId;
+    if (accountId) startDecoy(ws, accountId);
   };
 
   const appendMessage = (peerId: string, message: Message): void => {
@@ -231,7 +274,7 @@ export const useApp = create<AppState>((set, get) => {
           id: envelope.id,
           peerId: envelope.sender_id,
           direction: "received",
-          text: utf8Decode(plaintextProbe),
+          text: utf8Decode(unpad(plaintextProbe)),
           timestamp: envelope.timestamp,
           ttlSeconds: envelope.ttl_seconds,
           burnOnRead: envelope.burn_on_read,
@@ -273,7 +316,7 @@ export const useApp = create<AppState>((set, get) => {
                 id: envelope.id,
                 peerId: envelope.sender_id,
                 direction: "received",
-                text: utf8Decode(plaintext),
+                text: utf8Decode(unpad(plaintext)),
                 timestamp: envelope.timestamp,
                 ttlSeconds: envelope.ttl_seconds,
                 burnOnRead: envelope.burn_on_read,
@@ -301,7 +344,10 @@ export const useApp = create<AppState>((set, get) => {
           if (!keyStore) break;
           const existing = keyStore.oneTimePrekeys as unknown as SerializedOneTimePrekey[];
           const nextId = existing.reduce((max, p) => Math.max(max, p.id), 0) + 1;
-          const fresh = await generateOneTimePrekeys(ONE_TIME_PREKEY_BATCH - event.remaining, nextId);
+          const fresh = await generateOneTimePrekeys(
+            ONE_TIME_PREKEY_BATCH - event.remaining,
+            nextId,
+          );
           keyStore.oneTimePrekeys = [
             ...existing,
             ...fresh.map(serializeOneTimePrekey),
@@ -367,8 +413,12 @@ export const useApp = create<AppState>((set, get) => {
         version: 1,
         accountId: account_id,
         identityKey: serializeIdentity(identity) as unknown as KeyStore["identityKey"],
-        signedPrekeys: [serializeSignedPrekey(signedPrekey)] as unknown as KeyStore["signedPrekeys"],
-        oneTimePrekeys: oneTimePrekeys.map(serializeOneTimePrekey) as unknown as KeyStore["oneTimePrekeys"],
+        signedPrekeys: [
+          serializeSignedPrekey(signedPrekey),
+        ] as unknown as KeyStore["signedPrekeys"],
+        oneTimePrekeys: oneTimePrekeys.map(
+          serializeOneTimePrekey,
+        ) as unknown as KeyStore["oneTimePrekeys"],
         sessions: {},
         verifiedContacts: {},
       };
@@ -438,7 +488,9 @@ export const useApp = create<AppState>((set, get) => {
       if (!contact || !accountId || !ws) return;
 
       const session = deserializeSession(contact.session);
-      const encrypted = await ratchetEncrypt(session, utf8Encode(text));
+      // Pad the plaintext to a 256-byte block before encrypting so ciphertext
+      // length leaks nothing — and so decoy traffic is the same size as real.
+      const encrypted = await ratchetEncrypt(session, await pad(utf8Encode(text)));
       contact.session = serializeSession(session);
       set((s) => ({ contacts: { ...s.contacts, [peerId]: { ...contact } } }));
 
@@ -471,6 +523,82 @@ export const useApp = create<AppState>((set, get) => {
         opened: true,
       });
       await persist();
+    },
+
+    async sendDeadDrop(peerId, text) {
+      const { contacts, accountId } = get();
+      const contact = contacts[peerId];
+      if (!contact || !accountId) throw new Error("unknown contact");
+
+      // Encrypt exactly as a normal message — the dead drop carries a full
+      // envelope so the recipient decrypts it with the established session.
+      const session = deserializeSession(contact.session);
+      // Pad the plaintext to a 256-byte block before encrypting so ciphertext
+      // length leaks nothing — and so decoy traffic is the same size as real.
+      const encrypted = await ratchetEncrypt(session, await pad(utf8Encode(text)));
+      contact.session = serializeSession(session);
+      set((s) => ({ contacts: { ...s.contacts, [peerId]: { ...contact } } }));
+
+      const envelope: MessageEnvelope = {
+        id: crypto.randomUUID(),
+        sender_id: accountId,
+        recipient_id: peerId,
+        ciphertext: b64(encrypted.blob),
+        ephemeral_key: contact.pendingEphemeralKey,
+        prekey_id: contact.pendingPrekeyId,
+        message_number: encrypted.messageNumber,
+        previous_chain_length: encrypted.previousChainLength,
+        timestamp: new Date().toISOString(),
+        ttl_seconds: null,
+        burn_on_read: false,
+        media_type: "text",
+        version: PROTOCOL_VERSION,
+      };
+
+      // Seal the ENTIRE envelope — sender_id, recipient_id, ratchet headers and
+      // all — to the recipient's identity key, then pad. The relay (and anyone
+      // who reads the stored row) sees only an opaque sealed box: no metadata
+      // links the two parties. The recipient is the only one who can open it.
+      const recipientX25519 = await identityKeyToX25519(unb64(contact.identityKey));
+      const sealed = await sealTo(recipientX25519, utf8Encode(JSON.stringify(envelope)));
+      const padded = await pad(sealed);
+      const { token, dropId } = await generateDropToken();
+      const powNonce = await solveProofOfWork(dropId, DROP_POW_DIFFICULTY);
+      await api.depositDrop({
+        drop_id: await toBase64(dropId),
+        ciphertext: await toBase64(padded),
+        pow_nonce: await toBase64(powNonce),
+      });
+
+      appendMessage(peerId, {
+        id: envelope.id,
+        peerId,
+        direction: "sent",
+        text,
+        timestamp: envelope.timestamp,
+        ttlSeconds: null,
+        burnOnRead: false,
+        deliveredAt: Date.now(),
+        burning: false,
+        opened: true,
+      });
+      await persist();
+      // The token is the capability — shared out of band, never with the server.
+      return await toBase64(token);
+    },
+
+    async redeemDeadDrop(tokenB64) {
+      const { keyStore } = get();
+      if (!keyStore) throw new Error("locked");
+      const { ciphertext } = await api.redeemDrop(tokenB64.trim());
+      // Unpad, then open the sealed box with our identity's X25519 keypair.
+      const sealed = unpad(await fromBase64(ciphertext));
+      const identity = deserializeIdentity(keyStore.identityKey as unknown as SerializedIdentity);
+      const opened = await openSealed(identity.x25519PublicKey, identity.x25519PrivateKey, sealed);
+      const envelope = parseEnvelope(JSON.parse(utf8Decode(opened)));
+      // Reuse the normal inbound path to establish/advance the session and
+      // surface the message.
+      handleServerEvent({ type: "message.deliver", envelope });
     },
 
     openMessage(peerId, messageId) {
@@ -523,6 +651,7 @@ export const useApp = create<AppState>((set, get) => {
     async deleteAccount() {
       const token = await freshToken();
       await api.deleteAccount(token);
+      stopDecoy();
       get().ws?.close();
       await destroyVault();
       set({
@@ -540,6 +669,7 @@ export const useApp = create<AppState>((set, get) => {
     },
 
     lock() {
+      stopDecoy();
       get().ws?.close();
       // Drop key material and decrypted messages from memory.
       set({

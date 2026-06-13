@@ -30,6 +30,13 @@ func Run(ctx context.Context, store *db.Store, ttl time.Duration) {
 			} else if purged > 0 {
 				log.Printf("janitor: purged %d undelivered envelopes past TTL", purged)
 			}
+			// Dead drops are destroyed at their TTL whether collected or not.
+			drops, err := store.PurgeExpiredDrops(ctx, time.Now())
+			if err != nil {
+				log.Printf("janitor: drop purge failed: %v", err)
+			} else if drops > 0 {
+				log.Printf("janitor: purged %d expired dead drops", drops)
+			}
 		}
 	}
 }

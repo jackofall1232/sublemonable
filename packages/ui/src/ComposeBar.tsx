@@ -4,25 +4,41 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useState } from "react";
-import { LemonSlice } from "./LemonSlice.js";
+import { SendButton } from "./SendButton.js";
 import { color, motion, typography } from "./tokens.js";
 
 export interface ComposeBarProps {
   onSend: (text: string) => void;
   onAttach?: () => void;
   disabled?: boolean;
+  sending?: boolean;
   placeholder?: string;
+  /** Long-press the send button to compose a dead drop (Ghost/Stealth modes). */
+  onSendAsDeadDrop?: (text: string) => void;
 }
 
-export function ComposeBar({ onSend, onAttach, disabled = false, placeholder = "Message" }: ComposeBarProps) {
+export function ComposeBar({
+  onSend,
+  onAttach,
+  disabled = false,
+  sending = false,
+  placeholder = "Message",
+  onSendAsDeadDrop,
+}: ComposeBarProps) {
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
-  const [pressed, setPressed] = useState(false);
 
   const send = () => {
     const trimmed = text.trim();
     if (!trimmed || disabled) return;
     onSend(trimmed);
+    setText("");
+  };
+
+  const sendAsDeadDrop = () => {
+    const trimmed = text.trim();
+    if (!trimmed || disabled || !onSendAsDeadDrop) return;
+    onSendAsDeadDrop(trimmed);
     setText("");
   };
 
@@ -84,40 +100,14 @@ export function ComposeBar({ onSend, onAttach, disabled = false, placeholder = "
           transition: `border-color ${motion.durationBase} ${motion.easingDefault}`,
         }}
       />
-      {/* The send button is always lemon yellow — it is the primary action color. */}
-      <button
-        type="button"
-        onClick={send}
-        onMouseDown={() => setPressed(true)}
-        onMouseUp={() => setPressed(false)}
-        onMouseLeave={() => setPressed(false)}
+      {/* The send button is always lemon yellow — it is the primary action color.
+          Long-press surfaces "Send as dead drop" when the handler is provided. */}
+      <SendButton
+        onSend={send}
         disabled={disabled}
-        aria-label="Send"
-        style={{
-          width: 40,
-          height: 40,
-          flexShrink: 0,
-          borderRadius: "50%",
-          border: "none",
-          cursor: disabled ? "not-allowed" : "pointer",
-          background: color.core.lemon,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          transform: pressed ? "scale(0.92)" : "scale(1)",
-          transition: `transform ${motion.durationBase} ${motion.easingBounce}, background ${motion.durationBase}, box-shadow ${motion.durationBase}`,
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = color.core.lemonBright;
-          e.currentTarget.style.boxShadow = "0 0 16px rgba(245,230,66,0.4)";
-        }}
-        onMouseOut={(e) => {
-          e.currentTarget.style.background = color.core.lemon;
-          e.currentTarget.style.boxShadow = "none";
-        }}
-      >
-        <LemonSlice variant="send_button" size={24} segments={8} fillColor={color.semantic.textOnLemon} />
-      </button>
+        sending={sending}
+        onLongPress={onSendAsDeadDrop ? sendAsDeadDrop : undefined}
+      />
     </div>
   );
 }

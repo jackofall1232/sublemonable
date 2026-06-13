@@ -162,7 +162,10 @@ export async function ratchetDecrypt(
 // ── internals ────────────────────────────────────────────────────────────────
 
 /** KDF_RK: (rootKey, dhOutput) → 64 bytes split into (rootKey', chainKey). */
-async function kdfRoot(rootKey: Uint8Array, dhOutput: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
+async function kdfRoot(
+  rootKey: Uint8Array,
+  dhOutput: Uint8Array,
+): Promise<[Uint8Array, Uint8Array]> {
   const okm = await hkdf(dhOutput, rootKey, ROOT_INFO, 64);
   sodium.memzero(dhOutput);
   return [okm.slice(0, KEY_BYTES), okm.slice(KEY_BYTES)];
@@ -183,7 +186,10 @@ async function advanceChain(
 }
 
 /** Receiving side of the DH ratchet: new remote key arrived. */
-async function dhRatchetReceiveStep(session: RatchetSession, theirRatchetKey: Uint8Array): Promise<void> {
+async function dhRatchetReceiveStep(
+  session: RatchetSession,
+  theirRatchetKey: Uint8Array,
+): Promise<void> {
   session.dhRemote = theirRatchetKey;
   session.previousSendCounter = session.sendCounter;
   session.sendCounter = 0;

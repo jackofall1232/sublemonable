@@ -1,0 +1,30 @@
+{
+  "name": "@sublemonable/relay-client",
+  "version": "1.5.0",
+  "description": "Sublemonable relay client — decoy traffic, circuit construction, and onion path selection",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "prettier --check src"
+  },
+  "dependencies": {
+    "@sublemonable/crypto": "workspace:*",
+    "@sublemonable/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}

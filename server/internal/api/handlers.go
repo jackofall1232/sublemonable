@@ -20,6 +20,7 @@ import (
 	"github.com/sublemonable/server/internal/config"
 	"github.com/sublemonable/server/internal/db"
 	"github.com/sublemonable/server/internal/ratelimit"
+	"github.com/sublemonable/server/internal/relay"
 )
 
 type Handlers struct {
@@ -28,6 +29,13 @@ type Handlers struct {
 	cfg           *config.Config
 	registerLimit *ratelimit.Limiter
 	prekeyLimit   *ratelimit.Limiter
+	dropLimit     *ratelimit.Limiter
+	// relayKey is non-nil only when this deployment is configured as a relay node.
+	relayKey  *relay.KeyPair
+	forwarder Forwarder
+	// relayPeers is the allowlist of next-hop forward URLs this relay may forward
+	// to. Empty means forwarding is refused (fail closed) — an SSRF guard.
+	relayPeers map[string]bool
 }
 
 func New(store *db.Store, issuer *auth.Issuer, cfg *config.Config) *Handlers {
@@ -37,7 +45,41 @@ func New(store *db.Store, issuer *auth.Issuer, cfg *config.Config) *Handlers {
 		cfg:           cfg,
 		registerLimit: ratelimit.New(5, time.Hour, cfg.RateLimitEnabled),
 		prekeyLimit:   ratelimit.New(50, time.Minute, cfg.RateLimitEnabled),
+		// Dead drops are unauthenticated — proof-of-work is the main cost, but a
+		// per-IP cap blunts abuse from a single source too.
+		dropLimit:  ratelimit.New(60, time.Minute, cfg.RateLimitEnabled),
+		relayKey:   loadRelayKey(cfg),
+		forwarder:  DefaultForwarder(),
+		relayPeers: relayPeerSet(cfg.RelayPeers),
 	}
+}
+
+func relayPeerSet(peers []string) map[string]bool {
+	set := make(map[string]bool, len(peers))
+	for _, p := range peers {
+		set[p] = true
+	}
+	return set
+}
+
+// RelayEnabled reports whether this deployment serves /relay/forward.
+func (h *Handlers) RelayEnabled() bool { return h.relayKey != nil }
+
+// loadRelayKey decodes the relay Curve25519 keypair from config, or returns nil
+// if this deployment is not acting as a relay node.
+func loadRelayKey(cfg *config.Config) *relay.KeyPair {
+	if cfg.RelayPrivateKey == "" || cfg.RelayPublicKey == "" {
+		return nil
+	}
+	priv, err1 := base64.StdEncoding.DecodeString(cfg.RelayPrivateKey)
+	pub, err2 := base64.StdEncoding.DecodeString(cfg.RelayPublicKey)
+	if err1 != nil || err2 != nil || len(priv) != 32 || len(pub) != 32 {
+		return nil
+	}
+	kp := &relay.KeyPair{}
+	copy(kp.Private[:], priv)
+	copy(kp.Public[:], pub)
+	return kp
 }
 
 func errJSON(c *fiber.Ctx, status int, code string) error {

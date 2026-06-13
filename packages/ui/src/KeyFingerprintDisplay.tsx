@@ -50,7 +50,9 @@ export function KeyFingerprintDisplay({
         {groups.map((g, i) => (
           <span
             key={i}
-            style={{ color: highlightGroups.includes(i) ? color.core.lemon : color.semantic.textSecondary }}
+            style={{
+              color: highlightGroups.includes(i) ? color.core.lemon : color.semantic.textSecondary,
+            }}
           >
             {g}
           </span>

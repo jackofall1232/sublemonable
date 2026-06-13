@@ -24,7 +24,12 @@ export function ConversationList({ conversations, activeId, onSelect }: Conversa
   return (
     <nav aria-label="Conversations" style={{ display: "flex", flexDirection: "column" }}>
       {conversations.map((c) => (
-        <ConversationListItem key={c.id} conversation={c} active={c.id === activeId} onSelect={onSelect} />
+        <ConversationListItem
+          key={c.id}
+          conversation={c}
+          active={c.id === activeId}
+          onSelect={onSelect}
+        />
       ))}
     </nav>
   );
@@ -70,7 +75,9 @@ function ConversationListItem({
           flexShrink: 0,
           borderRadius: "50%",
           background: `linear-gradient(135deg, ${color.core.lemon}, ${color.core.lemonZest})`,
-          border: c.verified ? `2px solid ${color.semantic.verifiedGreen}` : "2px solid transparent",
+          border: c.verified
+            ? `2px solid ${color.semantic.verifiedGreen}`
+            : "2px solid transparent",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

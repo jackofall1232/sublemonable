@@ -33,12 +33,18 @@ export interface KeyStore {
 const KEYSTORE_AD = utf8Encode("Sublemonable-KeyStore-v1");
 
 /** Encrypt the key store for storage at rest (AES-256-GCM, fresh nonce inside). */
-export async function encryptKeyStore(masterKey: Uint8Array, keyStore: KeyStore): Promise<Uint8Array> {
+export async function encryptKeyStore(
+  masterKey: Uint8Array,
+  keyStore: KeyStore,
+): Promise<Uint8Array> {
   return aeadEncrypt(masterKey, utf8Encode(JSON.stringify(keyStore)), KEYSTORE_AD);
 }
 
 /** Decrypt the key store. Throws on a wrong passphrase (GCM tag failure). */
-export async function decryptKeyStore(masterKey: Uint8Array, encryptedBlob: Uint8Array): Promise<KeyStore> {
+export async function decryptKeyStore(
+  masterKey: Uint8Array,
+  encryptedBlob: Uint8Array,
+): Promise<KeyStore> {
   const plaintext = await aeadDecrypt(masterKey, encryptedBlob, KEYSTORE_AD);
   const parsed = JSON.parse(utf8Decode(plaintext)) as KeyStore;
   if (parsed.version !== 1) throw new Error("unsupported keystore version");

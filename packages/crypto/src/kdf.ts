@@ -19,10 +19,7 @@ export async function hkdf(
   const blocks: Uint8Array[] = [];
   let previous: Uint8Array = new Uint8Array(0);
   for (let i = 1; blocks.reduce((n, b) => n + b.length, 0) < length; i++) {
-    previous = sodium.crypto_auth_hmacsha256(
-      concat(previous, infoBytes, new Uint8Array([i])),
-      prk,
-    );
+    previous = sodium.crypto_auth_hmacsha256(concat(previous, infoBytes, new Uint8Array([i])), prk);
     blocks.push(previous);
   }
   return concat(...blocks).slice(0, length);
