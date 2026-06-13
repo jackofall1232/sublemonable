@@ -1,0 +1,492 @@
+{
+  "project": {
+    "name": "Sublemonable",
+    "version": "2.0.0",
+    "description": "Decentralized, zero-knowledge, end-to-end encrypted ephemeral messaging. Identity anchored on Algorand Layer 2. Messages routed through a permissionless P2P relay network. No central server.",
+    "license": "AGPL-3.0",
+    "inherits_from": "sublemonable-MASTER.json (v1)",
+    "migration_strategy": "v1 users migrate by linking their existing account to an Algorand identity. All encryption, UI, and message behavior is identical to v1.",
+    "repo_structure": {
+      "monorepo": true,
+      "package_manager": "pnpm workspaces",
+      "root_dirs": [
+        "apps/web",
+        "apps/ios",
+        "apps/android",
+        "packages/crypto",
+        "packages/protocol",
+        "packages/ui",
+        "packages/relay-client",
+        "packages/chain",
+        "node/relay",
+        "node/bootstrap",
+        "contracts",
+        "docs",
+        "website"
+      ],
+      "new_in_v2": [
+        "packages/relay-client — P2P relay network client library",
+        "packages/chain — Algorand identity layer client",
+        "node/relay — relay node server software (run by community)",
+        "node/bootstrap — bootstrap node for initial peer discovery",
+        "contracts — Algorand smart contracts (ARC-4 ABI)"
+      ]
+    }
+  },
+
+  "v1_to_v2_delta": {
+    "removed": [
+      "server/ — centralized Go server replaced by relay node network",
+      "Single PostgreSQL instance — replaced by distributed relay node storage"
+    ],
+    "kept_identical": [
+      "All Signal Protocol encryption (packages/crypto) — unchanged",
+      "All message schemas (packages/protocol) — unchanged",
+      "All UI components and design system (packages/ui) — unchanged",
+      "All app UX — web, iOS, Android — unchanged from user perspective",
+      "Screenshot protection — unchanged",
+      "Burn-on-read and TTL — unchanged",
+      "JWT auth — replaced by wallet signature auth (transparent to user)",
+      "All open source files, docs, contributing guides"
+    ],
+    "changed": [
+      "Identity registration — from centralized DB to Algorand smart contract",
+      "Prekey storage — from centralized server to relay node DHT",
+      "Message delivery — from single server WebSocket to relay node network",
+      "Authentication — from JWT to cryptographic wallet signature (secp256k1 or ed25519)",
+      "Account discovery — from UUID lookup to on-chain identity resolution"
+    ],
+    "added": [
+      "Sealed Sender — sender identity encrypted inside envelope, relay never knows sender",
+      "Message padding — all messages padded to 256-byte blocks before encryption",
+      "Panic / wipe mode — instant local data destruction gesture",
+      "Device verification — multi-device key registry signed by identity key",
+      "Memory zeroing — sensitive buffers zeroed immediately after use",
+      "Identity key rotation — users can rotate long-term keys with on-chain proof",
+      "Algorand identity layer — public keys anchored on-chain",
+      "Relay node network — permissionless, anyone can run a node",
+      "Node staking — relay nodes stake ALGO to deter spam and sybil attacks",
+      "Bootstrap nodes — initial peer discovery run by Sublemonable team"
+    ]
+  },
+
+  "security_additions": {
+    "sealed_sender": {
+      "description": "Sender identity is encrypted inside the message envelope. The relay network only knows the recipient — never the sender.",
+      "implementation": "libsignal SealedSender API — available in libsignal-client for all platforms",
+      "metadata_protected": "Even a compromised relay node cannot determine who sent a message to whom",
+      "note": "This is the single highest-value security addition from v1 to v2"
+    },
+    "message_padding": {
+      "description": "All messages padded to fixed-size blocks before encryption to prevent traffic analysis based on message length",
+      "block_size_bytes": 256,
+      "implementation": "Append PKCS7-style padding to plaintext before passing to Signal Protocol encrypt",
+      "strips_on_decrypt": true,
+      "cost": "Negligible — tiny bandwidth overhead, zero UX impact"
+    },
+    "panic_mode": {
+      "description": "Instant full wipe of all local data, keys, and messages",
+      "triggers": [
+        "Dedicated panic gesture — 3-finger long press on main screen",
+        "Duress PIN — secondary PIN that looks like normal unlock but silently wipes",
+        "Remote wipe — send a special encrypted signal from another linked device"
+      ],
+      "what_is_wiped": [
+        "All decrypted message content",
+        "All session keys and ratchet state",
+        "All identity and prekeys from local storage",
+        "All contact records",
+        "App data directory"
+      ],
+      "os_specific": {
+        "android": "deleteRecursively() on app data dir + Keystore key deletion",
+        "ios": "SecItemDelete all Keychain entries + wipe app documents dir",
+        "web": "indexedDB.deleteDatabase() + localStorage.clear() + sessionStorage.clear()"
+      },
+      "after_wipe": "App appears as freshly installed — no evidence of prior use"
+    },
+    "device_verification": {
+      "description": "Each linked device has its own keypair signed by the user's identity key. Contacts can see and verify all linked devices.",
+      "device_key": "Curve25519 keypair generated per device",
+      "binding": "Device public key signed by identity key, signature stored on-chain",
+      "new_device_flow": "New device shows as unverified to contacts until user confirms via safety number comparison",
+      "max_linked_devices": 5,
+      "revocation": "User can revoke any device key — revocation recorded on-chain"
+    },
+    "memory_protection": {
+      "description": "Sensitive data zeroed from memory immediately after use",
+      "implementations": {
+        "go_relay_node": "Use crypto/subtle.ConstantTimeCompare and explicit zeroing with defer",
+        "typescript_web": "Uint8Array.fill(0) on all key material immediately after use",
+        "ios": "Use SecureEnclave for identity key — key never enters app memory",
+        "android": "Android Keystore hardware-backed — key operations happen in secure element"
+      },
+      "swap_prevention": "Keys marked with mlock equivalent where OS supports it"
+    },
+    "identity_key_rotation": {
+      "description": "Users can rotate their long-term identity key if they believe it is compromised",
+      "on_chain": "New identity key published to Algorand contract, signed by old key as proof of continuity",
+      "contact_notification": "All contacts receive encrypted notification of key change via relay network",
+      "contact_action": "Contacts prompted to re-verify safety number",
+      "old_key": "Marked as rotated on-chain with timestamp — old sessions invalidated"
+    },
+    "traffic_obfuscation": {
+      "description": "Optional transport layer that makes Sublemonable traffic indistinguishable from generic HTTPS",
+      "method": "obfs4 pluggable transport",
+      "enabled_by_default": false,
+      "opt_in": true,
+      "note": "For high-risk users in network surveillance environments"
+    }
+  },
+
+  "algorand_layer": {
+    "purpose": "Decentralized identity registry and relay node coordination. Messages NEVER touch the blockchain.",
+    "network": {
+      "mainnet": "mainnet-v1.0",
+      "testnet": "testnet-v1.0 — used during development and v2 beta",
+      "layer_2": {
+        "solution": "Algorand State Channels or AVM-native smart contracts",
+        "note": "Pure L1 Algorand is fast enough (~3.5s finality, ~0.001 ALGO per tx) that a full L2 may be unnecessary. Use L1 for identity ops which are infrequent. Evaluate L2 only if volume demands it."
+      }
+    },
+    "token": {
+      "currency": "ALGO (native)",
+      "no_custom_token": true,
+      "rationale": "No Sublemonable token. Using native ALGO avoids tokenomics complexity, regulatory risk, and speculation. Users just need a small amount of ALGO for tx fees (~0.1 ALGO to register)."
+    },
+    "smart_contracts": {
+      "language": "PyTEAL / ARC-4",
+      "contracts": {
+        "IdentityRegistry": {
+          "path": "contracts/IdentityRegistry.py",
+          "purpose": "Maps user account IDs to their public identity keys on-chain",
+          "state": {
+            "global": [
+              "total_accounts: uint64",
+              "version: uint64"
+            ],
+            "local_per_account": [
+              "identity_key: bytes[32] — Curve25519 public key",
+              "signed_prekey: bytes[32]",
+              "signed_prekey_signature: bytes[64]",
+              "key_version: uint64",
+              "registered_at: uint64",
+              "rotated_at: uint64",
+              "active: bool"
+            ]
+          },
+          "methods": [
+            "register(identity_key, signed_prekey, signature) — opt-in, costs ~0.1 ALGO",
+            "rotate_key(new_identity_key, new_signed_prekey, old_key_signature)",
+            "deregister() — marks account inactive, clears keys",
+            "get_identity(account_address) -> identity_key",
+            "get_prekey_bundle(account_address) -> PreKeyBundle"
+          ]
+        },
+        "RelayRegistry": {
+          "path": "contracts/RelayRegistry.py",
+          "purpose": "Directory of active relay nodes. Nodes register here to be discoverable.",
+          "state": {
+            "global": [
+              "total_relays: uint64",
+              "min_stake_algo: uint64 — currently 10 ALGO"
+            ],
+            "local_per_relay": [
+              "endpoint: bytes — WSS URL of relay node",
+              "public_key: bytes[32] — relay node's signing key",
+              "stake: uint64 — ALGO staked",
+              "registered_at: uint64",
+              "last_heartbeat: uint64",
+              "messages_relayed: uint64",
+              "active: bool"
+            ]
+          },
+          "methods": [
+            "register_node(endpoint, public_key) — requires min stake of 10 ALGO",
+            "heartbeat() — relay calls this every 5 minutes to signal liveness",
+            "deregister_node() — reclaims stake, marks inactive",
+            "get_active_relays() -> RelayNode[]",
+            "slash_node(evidence) — penalize misbehaving node (future governance)"
+          ]
+        },
+        "DeviceRegistry": {
+          "path": "contracts/DeviceRegistry.py",
+          "purpose": "Per-user linked device key registry",
+          "state": {
+            "local_per_account": [
+              "device_keys: bytes[] — up to 5 device public keys",
+              "device_signatures: bytes[] — each signed by identity key",
+              "device_count: uint64"
+            ]
+          },
+          "methods": [
+            "add_device(device_key, identity_signature)",
+            "revoke_device(device_key)",
+            "get_devices(account_address) -> DeviceKey[]"
+          ]
+        }
+      }
+    },
+    "client_library": {
+      "path": "packages/chain",
+      "language": "TypeScript",
+      "sdk": "algosdk (official Algorand JS SDK)",
+      "exports": [
+        "registerIdentity(identityKey, signedPrekey, signature) -> txId",
+        "rotateIdentityKey(newKey, newPrekey, oldKeySig) -> txId",
+        "resolveIdentity(accountAddress) -> IdentityBundle",
+        "registerRelayNode(endpoint, pubkey, stakeAmount) -> txId",
+        "getActiveRelays() -> RelayNode[]",
+        "addDevice(deviceKey, identitySig) -> txId",
+        "revokeDevice(deviceKey) -> txId",
+        "getDevices(accountAddress) -> DeviceKey[]",
+        "deregisterAccount() -> txId"
+      ],
+      "wallet_integration": {
+        "web": "Pera Wallet Connect or WalletConnect v2 — user signs txs in their wallet app",
+        "mobile": "Pera Wallet deep link integration",
+        "note": "For most users, wallet interaction is invisible — keys are managed by Sublemonable. Advanced users can bring their own Algorand wallet."
+      }
+    }
+  },
+
+  "relay_network": {
+    "architecture": "Permissionless P2P relay network. Anyone can run a node. Nodes store encrypted message envelopes temporarily until delivery.",
+    "protocol": "Custom over WebSocket Secure (WSS)",
+    "message_flow": {
+      "step_1": "Sender looks up recipient prekey bundle from Algorand IdentityRegistry",
+      "step_2": "Sender performs X3DH key exchange using prekey bundle",
+      "step_3": "Sender encrypts message with Signal Protocol (Double Ratchet)",
+      "step_4": "Sender wraps in Sealed Sender envelope — relay cannot identify sender",
+      "step_5": "Sender pads ciphertext to 256-byte block boundary",
+      "step_6": "Sender queries RelayRegistry on-chain for active relay nodes",
+      "step_7": "Sender connects to 2-3 relay nodes and submits encrypted envelope",
+      "step_8": "Relay nodes store envelope (max 72h) until recipient connects",
+      "step_9": "Recipient connects to relay, fetches envelope, sends delivery ACK",
+      "step_10": "Relay deletes envelope immediately on ACK",
+      "step_11": "Recipient decrypts — Sealed Sender reveals true sender only to recipient"
+    },
+    "relay_node": {
+      "path": "node/relay",
+      "language": "Go 1.22+",
+      "what_relay_knows": [
+        "Recipient account address (needed for routing)",
+        "Encrypted ciphertext blob (cannot decrypt)",
+        "Approximate message size (padded to 256-byte blocks, so only block count)",
+        "Rough timing of submission and delivery"
+      ],
+      "what_relay_never_knows": [
+        "Sender identity (Sealed Sender)",
+        "Message content (E2EE)",
+        "Exact message size (padding)",
+        "Contact relationships between users"
+      ],
+      "storage": {
+        "engine": "BadgerDB (embedded key-value, no external DB dependency)",
+        "schema": "recipient_id -> [EncryptedEnvelope]",
+        "ttl_hours": 72,
+        "max_envelope_size_bytes": 65536,
+        "auto_purge": "BadgerDB TTL — envelopes expire automatically"
+      },
+      "networking": {
+        "inbound": "WSS on configurable port (default 7777)",
+        "tls": "Auto-provisioned via Let's Encrypt (certmagic)",
+        "tor": "Optional hidden service (.onion) — config flag"
+      },
+      "anti_spam": {
+        "proof_of_work": "Client must solve lightweight Hashcash puzzle before submitting envelope",
+        "rate_limiting": "Max 100 envelopes per sender address per hour",
+        "stake_requirement": "Relay nodes must stake 10 ALGO on-chain — slashable for misbehavior",
+        "max_pending_per_recipient": 1000
+      },
+      "heartbeat": "Node calls RelayRegistry.heartbeat() on Algorand every 5 minutes to signal liveness",
+      "config_file": "relay.toml — endpoint, Algorand node URL, stake wallet, storage path, TLS, Tor"
+    },
+    "bootstrap_nodes": {
+      "path": "node/bootstrap",
+      "purpose": "Initial hardcoded relay nodes run by Sublemonable team to bootstrap the network",
+      "count_at_launch": 2,
+      "note": "These are the nodes you run initially. As community nodes register on-chain, clients prefer community nodes.",
+      "decentralization_milestone": "When 10+ independent nodes are active, bootstrap nodes step back to observer role"
+    },
+    "client_relay_library": {
+      "path": "packages/relay-client",
+      "language": "TypeScript",
+      "purpose": "Used by all app clients to interact with relay network",
+      "exports": [
+        "discoverRelays() -> RelayNode[] — reads from Algorand RelayRegistry",
+        "connectToRelay(node: RelayNode) -> RelayConnection",
+        "sendEnvelope(envelope: SealedEnvelope, recipientId: string) -> DeliveryResult",
+        "fetchEnvelopes(myAccountId: string) -> SealedEnvelope[]",
+        "ackDelivery(envelopeId: string) -> void",
+        "requestBurn(envelopeId: string) -> void"
+      ],
+      "relay_selection": "Client connects to 2 relays simultaneously for redundancy. Prefers low-latency nodes. Rotates relay selection periodically.",
+      "fallback": "If all discovered relays are unreachable, fall back to bootstrap nodes"
+    }
+  },
+
+  "node_operation": {
+    "for_founder": {
+      "initial_setup": [
+        "1. Provision 2 VPS instances (Hetzner CX21 or equivalent — ~$5/month each)",
+        "2. Install Docker on each",
+        "3. Run: docker run sublemonable/relay-node with relay.toml config",
+        "4. Fund an Algorand wallet with ~20 ALGO per node (stake + tx fees)",
+        "5. Register each node on RelayRegistry smart contract",
+        "6. Nodes appear in on-chain directory — clients discover automatically",
+        "7. Monitor via relay node dashboard (built into node/relay)"
+      ],
+      "monthly_cost_estimate": "$10-20/month for 2 nodes at launch",
+      "scaling": "Add more nodes as user count grows. Community nodes reduce your hosting costs over time."
+    },
+    "for_community_operators": {
+      "requirements": [
+        "A VPS with a public IP and domain",
+        "Docker installed",
+        "10 ALGO stake (~$1.50 at current prices)",
+        "Port 7777 open (or custom)",
+        "TLS certificate (auto via Let's Encrypt)"
+      ],
+      "incentives_v2": "No token rewards in v2 — operators run nodes for ideological reasons or to support users in their region. Token incentive layer is a v3 consideration.",
+      "one_line_install": "docker run -v $(pwd)/relay.toml:/etc/relay.toml sublemonable/relay-node:latest"
+    }
+  },
+
+  "migration": {
+    "v1_to_v2_user_flow": {
+      "step_1": "App update prompts user to migrate to decentralized identity",
+      "step_2": "App generates Algorand key pair (or user connects existing wallet)",
+      "step_3": "App registers existing identity key to Algorand address via IdentityRegistry contract",
+      "step_4": "Small ALGO fee required (~0.1 ALGO) — app can optionally subsidize this for first N users",
+      "step_5": "Existing contacts are notified of on-chain identity via relay network",
+      "step_6": "v1 server kept running read-only for 90 days, then decommissioned",
+      "note": "From the user's perspective: one migration screen, one confirmation. All messages and contacts carry over."
+    },
+    "backwards_compatibility": "v2 clients can communicate with v1 server during transition period via compatibility shim in packages/relay-client"
+  },
+
+  "build_order": {
+    "prereq": "v1 must be fully shipped and stable before starting v2",
+    "phase_1": {
+      "name": "Security Additions (can ship as v1.1)",
+      "deliverables": [
+        "Sealed Sender — integrate libsignal SealedSender API across all platforms",
+        "Message padding — 256-byte block padding in packages/crypto",
+        "Panic mode — wipe gesture + duress PIN on all platforms",
+        "Memory zeroing — Uint8Array.fill(0) after key use in TypeScript, defer zeroing in Go",
+        "Device verification UI — show linked devices, allow revocation"
+      ]
+    },
+    "phase_2": {
+      "name": "Algorand Contracts + Chain Package",
+      "deliverables": [
+        "contracts/IdentityRegistry.py — write, test on testnet",
+        "contracts/RelayRegistry.py — write, test on testnet",
+        "contracts/DeviceRegistry.py — write, test on testnet",
+        "packages/chain — TypeScript Algorand client library",
+        "Deploy all contracts to Algorand testnet",
+        "Integration tests for all contract methods"
+      ]
+    },
+    "phase_3": {
+      "name": "Relay Node Software",
+      "deliverables": [
+        "node/relay — Go relay node with BadgerDB, WSS, anti-spam, heartbeat",
+        "packages/relay-client — TypeScript relay network client",
+        "node/bootstrap — bootstrap node config",
+        "Docker image for relay node",
+        "relay.toml config documentation",
+        "Founder runs 2 relay nodes on testnet"
+      ]
+    },
+    "phase_4": {
+      "name": "App Integration",
+      "deliverables": [
+        "Replace server calls with packages/relay-client in apps/web",
+        "Replace server calls with relay client in apps/ios",
+        "Replace server calls with relay client in apps/android",
+        "Algorand wallet integration in all apps",
+        "Migration flow UI — v1 to v2 onboarding screen",
+        "End-to-end integration tests on testnet"
+      ]
+    },
+    "phase_5": {
+      "name": "Mainnet Launch",
+      "deliverables": [
+        "Deploy contracts to Algorand mainnet",
+        "Founder runs 2 mainnet relay nodes",
+        "v2 app release",
+        "docs/NODE_OPERATION.md — community node setup guide",
+        "v1 server set to read-only, 90-day deprecation notice",
+        "AUDIT.md — commission third-party audit of contracts + relay node"
+      ]
+    }
+  },
+
+  "devops": {
+    "relay_node_docker": {
+      "image": "sublemonable/relay-node",
+      "registry": "GitHub Container Registry (ghcr.io)",
+      "compose_file": "docker-compose.relay.yml",
+      "auto_update": "Watchtower container for automatic relay node updates"
+    },
+    "ci_cd": {
+      "contracts": "GitHub Actions — run PyTEAL compilation + Algorand sandbox tests on every PR",
+      "relay_node": "GitHub Actions — Go tests + Docker build + push to ghcr.io on merge to main",
+      "security_scan": "Semgrep + Trivy + smart contract audit tooling (Tealer for TEAL analysis)"
+    },
+    "monitoring": {
+      "relay_node": "Built-in /metrics endpoint (Prometheus format)",
+      "on_chain": "Algorand indexer for contract state monitoring",
+      "alerts": "PagerDuty or similar for bootstrap node downtime"
+    }
+  },
+
+  "fable_instructions": {
+    "note": "v2 blueprint — build AFTER v1 is fully shipped. Read sublemonable-MASTER.json for v1 context first.",
+    "start_here": "Read both sublemonable-MASTER.json and this file completely before writing a single line of code",
+    "order": [
+      "1. Add Sealed Sender to packages/crypto — wrap libsignal SealedSender API",
+      "2. Add message padding (256-byte blocks) to packages/crypto encrypt/decrypt",
+      "3. Add panic mode to all three apps — wipe gesture, duress PIN, wipe implementation per platform",
+      "4. Add memory zeroing to all key operations in packages/crypto",
+      "5. Write contracts/IdentityRegistry.py in PyTEAL with ARC-4 ABI",
+      "6. Write contracts/RelayRegistry.py in PyTEAL with ARC-4 ABI",
+      "7. Write contracts/DeviceRegistry.py in PyTEAL with ARC-4 ABI",
+      "8. Write packages/chain — TypeScript Algorand client using algosdk",
+      "9. Write node/relay — Go relay node (BadgerDB, WSS, anti-spam, heartbeat, Tor option)",
+      "10. Write packages/relay-client — TypeScript relay network client",
+      "11. Update apps/web to use packages/relay-client instead of direct server calls",
+      "12. Update apps/ios to use relay client",
+      "13. Update apps/android to use relay client",
+      "14. Write migration flow UI for v1 to v2 transition",
+      "15. Write docker-compose.relay.yml and relay.toml example config",
+      "16. Write docs/NODE_OPERATION.md — how to run a community relay node",
+      "17. Write GitHub Actions workflow for contract testing (.github/workflows/contracts.yml)",
+      "18. Deploy and test all contracts on Algorand testnet"
+    ],
+    "critical_rules": [
+      "MESSAGES NEVER TOUCH THE BLOCKCHAIN — only identity keys and relay node registry go on-chain",
+      "Sealed Sender must be implemented before relay network — the relay must never know the sender",
+      "Message padding must happen BEFORE Sealed Sender wrapping — pad plaintext, then seal, then send",
+      "Panic mode wipe must be irreversible and fast — target under 2 seconds for full wipe",
+      "Relay nodes store ONLY encrypted blobs — no plaintext, no metadata, no sender information",
+      "All relay node storage uses BadgerDB TTL — no manual deletion logic, TTL handles expiry",
+      "Algorand transactions are signed client-side — relay node and server never hold wallet keys",
+      "Stake requirement on RelayRegistry prevents sybil attacks — do not remove this",
+      "Bootstrap nodes are fallback only — clients must prefer on-chain discovered community nodes",
+      "All v1 critical rules still apply — no logging, no plaintext storage, parameterized SQL etc",
+      "Memory zeroing is not optional — implement in every function that handles key material",
+      "Duress PIN must be indistinguishable from real PIN to an observer — same UI, same timing"
+    ],
+    "algorand_specific": [
+      "Use algosdk v2+ (TypeScript) — not the deprecated v1 API",
+      "All contracts use ARC-4 ABI for method routing",
+      "Test all contracts on testnet before mainnet — use Algorand sandbox for CI",
+      "Minimum ALGO balance for account registration is 0.1 ALGO — document this clearly for users",
+      "Use atomic transaction groups where multiple contract calls must succeed together",
+      "Contract state reads are free — only writes cost ALGO — optimize for read-heavy patterns"
+    ]
+  }
+}

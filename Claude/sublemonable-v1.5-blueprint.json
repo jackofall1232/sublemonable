@@ -1,0 +1,452 @@
+{
+  "project": {
+    "name": "Sublemonable",
+    "version": "1.5.0",
+    "description": "The complete security onion. Every layer assumes the one beneath it has already failed. v1.5 adds plausible deniability, dead drop mode, decoy traffic, multi-hop relay, and Tor-first architecture — all before the blockchain layer of v2.",
+    "license": "AGPL-3.0",
+    "inherits_from": "sublemonable-MASTER.json (v1)",
+    "precedes": "sublemonable-v2-blueprint.json",
+    "philosophy": "Security is not a feature. It is an onion. Layer 4 failing must not expose layer 5. Layer 2 failing must not expose layer 4. Every layer is designed as if all others have already been compromised.",
+    "codename": "Ghost"
+  },
+
+  "security_onion": {
+    "description": "Complete layered security model as of v1.5. Each layer is independent.",
+    "layer_1_physical": {
+      "name": "Physical Access",
+      "features": [
+        "Panic wipe — 3-finger long press, full wipe in under 2 seconds",
+        "Duress PIN — alternate PIN that silently wipes while appearing to unlock",
+        "Plausible deniability — two vaults, one app, no evidence second vault exists",
+        "FLAG_SECURE — OS-level screenshot block on Android",
+        "Biometric lock — Face ID / Touch ID / fingerprint",
+        "Background app blur — content hidden when app not in foreground"
+      ]
+    },
+    "layer_2_network": {
+      "name": "Network",
+      "features": [
+        "TLS 1.3 — all transport encrypted",
+        "Certificate pinning — MITM impossible",
+        "Tor-first — default connection via Tor, clearnet is fallback not default",
+        "Multi-hop relay — 3-hop onion routing through relay network",
+        "Decoy traffic — continuous cover traffic, active and idle indistinguishable",
+        "obfs4 transport — Tor traffic obfuscated, looks like generic HTTPS"
+      ]
+    },
+    "layer_3_identity": {
+      "name": "Identity",
+      "features": [
+        "No phone number required",
+        "No email required",
+        "UUID routing — never exposed to other parties",
+        "Sealed Sender — relay network never knows sender identity",
+        "Dead drop mode — no direct communication channel between parties",
+        "QR-only contact exchange — no central discovery"
+      ]
+    },
+    "layer_4_message": {
+      "name": "Message",
+      "features": [
+        "Signal Protocol — E2EE with forward secrecy per message",
+        "Double Ratchet — new key every message",
+        "256-byte padding — message size analysis impossible",
+        "Burn on read — destruction on first open",
+        "TTL destruction — server purges on schedule regardless",
+        "Zero server logs — nothing stored to subpoena"
+      ]
+    },
+    "layer_5_storage": {
+      "name": "Storage",
+      "features": [
+        "Argon2id vault derivation — identical timing for all passphrases",
+        "Plausible deniability vaults — AES-256-GCM, cryptographically separate",
+        "AES-256-GCM at rest — all local data encrypted",
+        "Secure Enclave / Android Keystore — hardware-backed key operations",
+        "Memory zeroing — key material cleared from RAM immediately after use",
+        "Secure delete — overwrite before free on all sensitive data"
+      ]
+    }
+  },
+
+  "connection_modes": {
+    "description": "Three user-selectable connection modes. Selectable in Settings → Network → Connection Mode.",
+    "standard": {
+      "name": "Standard",
+      "description": "Tor routing + single relay hop + Sealed Sender. Suitable for everyday use.",
+      "tor": true,
+      "relay_hops": 1,
+      "decoy_traffic": false,
+      "dead_drop": false,
+      "indicator": "Single lemon slice segment lit in settings"
+    },
+    "stealth": {
+      "name": "Stealth",
+      "description": "Tor routing + 3-hop onion relay + decoy traffic. For sensitive communications.",
+      "tor": true,
+      "relay_hops": 3,
+      "decoy_traffic": true,
+      "decoy_intensity": "medium",
+      "dead_drop": false,
+      "indicator": "Three lemon slice segments lit in settings",
+      "latency_warning": "Messages may take 2-4 seconds longer to deliver"
+    },
+    "ghost": {
+      "name": "Ghost",
+      "description": "Tor + 3-hop relay + continuous decoy traffic + dead drop only. No persistent identity visible on the network.",
+      "tor": true,
+      "relay_hops": 3,
+      "decoy_traffic": true,
+      "decoy_intensity": "high",
+      "dead_drop": true,
+      "indicator": "All lemon slice segments lit, pulsing slowly",
+      "latency_warning": "Dead drop pickup requires recipient to be online or check manually",
+      "note": "In Ghost mode, all messages are dead drops. No direct channel exists."
+    }
+  },
+
+  "features": {
+
+    "plausible_deniability": {
+      "description": "Two completely separate encrypted vaults behind two different passphrases. No cryptographic evidence the second vault exists.",
+      "principle": "Both vaults are real registered accounts that can send and receive real messages. The decoy is not fake. It is a real identity.",
+      "vault_architecture": {
+        "vault_count": "Never stored anywhere. App tries passphrase against key slots. If it decrypts, that is the active profile.",
+        "key_derivation": "Argon2id with identical parameters for all passphrases — memory: 65536 KB, iterations: 3, parallelism: 4",
+        "timing_attack_prevention": "Both passphrases take identical wall-clock time to derive. No shortcut on decoy path. A stopwatch cannot distinguish them.",
+        "storage_isolation": "Vault A and Vault B use completely separate encrypted storage namespaces. No shared tables, no shared files.",
+        "storage_padding": "Decoy vault storage padded with random encrypted blocks proportional to total app storage — prevents size anomaly detection",
+        "key_slots": "App maintains 2 key slots (expandable to 4 in future). Each slot is a 32-byte random salt + AES-256-GCM encrypted vault key. Trying a passphrase attempts decryption of all slots. First successful decryption wins.",
+        "no_vault_index": "The integer number of vaults is never stored. Slot decryption failure is indistinguishable from wrong passphrase.",
+        "server_accounts": "Each vault has its own independent server account, identity key, and prekey bundle. The server cannot link them.",
+        "notifications": "Push notifications delivered as encrypted signals only. When decoy vault is active, real vault notifications are silenced and queued encrypted. No notification reveals real vault existence."
+      },
+      "forensic_protections": {
+        "file_timestamps": "All vault files use normalized timestamps. OS-level file metadata does not reveal activity patterns.",
+        "sqlite_wal": "WAL journal files encrypted and wiped immediately on checkpoint. No recoverable fragments.",
+        "indexeddb_web": "All IndexedDB entries are encrypted blobs keyed by derived identifiers. Schema reveals nothing about vault count or content.",
+        "secure_delete": "All deleted content overwritten with random bytes before deallocation on all platforms.",
+        "memory_forensics": "Decrypted vault contents never written to disk. In-memory only. Zeroed immediately on app background."
+      },
+      "decoy_best_practices": {
+        "activity_reminder": "App gently prompts if decoy profile unused for 7+ days: 'Your other profile has been quiet.' No explanation of why.",
+        "realistic_contacts": "Onboarding suggests adding 2-3 real public-facing contacts to decoy profile",
+        "ui_identical": "Decoy and real vault are visually identical. Same features, same performance, same everything.",
+        "naming": "Never called hidden vault, secret profile, or deniability in UI. Setup flow says only: 'Add a second passphrase for an alternate profile.'"
+      },
+      "platform_implementation": {
+        "web": "Custom encrypted storage layer over IndexedDB. All keys derived from vault key. No plaintext schema.",
+        "ios": "Separate Keychain entries per vault, keyed by derived fingerprint not vault index. Separate SQLite databases, both encrypted via SQLCipher.",
+        "android": "Separate EncryptedSharedPreferences namespaces. Separate encrypted SQLite via SQLCipher. Keystore entries keyed by derived alias."
+      },
+      "legal_note": "User provides passphrase A under compulsion. Decoy profile opens. No cryptographic evidence passphrase B exists. User has not provided false information. This mirrors the VeraCrypt hidden volume legal model."
+    },
+
+    "dead_drop_mode": {
+      "description": "Asynchronous anonymous message deposit. No direct communication channel between sender and recipient. No metadata linking the two parties.",
+      "tradecraft_origin": "Spy tradecraft technique. Sender leaves message at agreed location. Recipient retrieves it independently. The two never communicate directly.",
+      "how_it_works": {
+        "step_1": "Sender creates a dead drop — generates a one-time random drop ID and access token",
+        "step_2": "Sender encrypts message with recipient's public key (X3DH as normal)",
+        "step_3": "Sender deposits encrypted envelope at a relay node under the drop ID",
+        "step_4": "Drop ID and access token shared out-of-band — QR code, separate channel, in-person",
+        "step_5": "Recipient redeems token at any relay node — no account required for pickup",
+        "step_6": "Relay verifies token, delivers envelope, immediately destroys drop",
+        "step_7": "Token is single-use. Replay attack returns empty.",
+        "step_8": "No record of who deposited or who retrieved exists on any relay"
+      },
+      "anonymity_properties": {
+        "sender_identity": "Relay never knows. Drop deposited via Tor with no auth.",
+        "recipient_identity": "Relay never knows. Token redemption requires no account.",
+        "communication_link": "No metadata linking sender to recipient exists anywhere.",
+        "timing": "Sender deposits and recipient retrieves at different times. No timing correlation.",
+        "token_format": "256-bit random token. Single use. HMAC-verified by relay.",
+        "drop_ttl_hours": 72,
+        "after_ttl": "Drop destroyed whether collected or not. Sender not notified — by design."
+      },
+      "ui_flow": {
+        "create_drop": "Compose message → long press send → 'Send as dead drop' → generates QR code containing drop token → share QR out-of-band",
+        "redeem_drop": "Main screen → '+' → 'Redeem dead drop' → scan QR → message delivered and drop destroyed",
+        "ghost_mode": "In Ghost connection mode, all messages are automatically dead drops. No direct channels."
+      },
+      "server_changes": {
+        "new_endpoint": "POST /api/v1/drops — deposit encrypted envelope + token hash (no auth required, proof-of-work instead)",
+        "redeem_endpoint": "POST /api/v1/drops/redeem — present token, receive envelope, drop destroyed",
+        "storage": "Drop table: id (hash of token), ciphertext (blob), expires_at. Nothing else.",
+        "no_sender_field": "Drop table has no sender column. By design. Server cannot know.",
+        "proof_of_work": "Hashcash puzzle required to deposit — prevents spam without requiring account"
+      }
+    },
+
+    "decoy_traffic": {
+      "description": "Continuous cover traffic that makes real message sending indistinguishable from idle state. Eliminates traffic analysis.",
+      "problem_solved": "Even with Sealed Sender and Tor, an observer watching network traffic can see: this device sent something at 2:14am. Decoy traffic makes that observation meaningless.",
+      "implementation": {
+        "mechanism": "Background service generates fake encrypted envelopes at randomized intervals and submits them to relay nodes",
+        "indistinguishable": "Decoy envelopes are padded to identical 256-byte block sizes as real messages. Same Tor circuit. Same relay nodes. Same submission path.",
+        "fake_recipients": "Decoy traffic addressed to randomly generated UUIDs that resolve to nowhere. Relay stores briefly, TTL expires, purged. No real delivery.",
+        "timing_randomization": "Poisson process interval distribution — not uniform, not predictable. Matches human messaging patterns.",
+        "intensity_levels": {
+          "off": "No decoy traffic. Default in Standard mode.",
+          "low": "1 decoy per real message sent. Minimal battery impact.",
+          "medium": "Continuous at ~1 per 30-120 seconds randomized. Stealth mode default.",
+          "high": "Continuous at ~1 per 5-30 seconds randomized. Ghost mode default."
+        },
+        "battery_impact": {
+          "off": "None",
+          "low": "Negligible",
+          "medium": "~3-5% additional battery per hour",
+          "high": "~8-12% additional battery per hour"
+        },
+        "user_control": "Settings → Privacy → Cover Traffic → Off / Low / Medium / High. Current mode shown as lemon slice fill level."
+      },
+      "platform_notes": {
+        "ios": "BGProcessingTask for background decoy generation when app is backgrounded. Degrades gracefully if iOS kills background task.",
+        "android": "WorkManager periodic task. Foreground service option for maximum reliability.",
+        "web": "Service Worker background sync. Decoy traffic continues while browser tab is backgrounded."
+      }
+    },
+
+    "multi_hop_relay": {
+      "description": "Onion-routed message delivery through a chain of 3 relay nodes. No single node knows both sender and recipient.",
+      "inspired_by": "Tor's onion routing — adapted for the Sublemonable relay network specifically.",
+      "how_it_works": {
+        "path_selection": "Client queries relay registry and selects 3 relay nodes randomly. Nodes in different geographic regions preferred.",
+        "onion_encryption": {
+          "step_1": "Client encrypts message for Relay C (innermost layer)",
+          "step_2": "Client wraps in encryption for Relay B",
+          "step_3": "Client wraps in encryption for Relay A (outermost layer)",
+          "step_4": "Client sends to Relay A"
+        },
+        "relay_a": "Knows sender IP (via Tor, so not real IP). Decrypts outer layer. Sees only: forward to Relay B. Does not know final recipient.",
+        "relay_b": "Knows Relay A. Decrypts middle layer. Sees only: forward to Relay C. Knows neither sender nor recipient.",
+        "relay_c": "Knows Relay B. Decrypts inner layer. Sees only: recipient ID + encrypted envelope. Does not know sender.",
+        "recipient": "Picks up from Relay C. Decrypts with Signal Protocol. Sealed Sender reveals true sender only to recipient."
+      },
+      "what_each_node_knows": {
+        "relay_a": ["Previous hop (Tor exit node — not real sender IP)", "Next hop (Relay B address)", "Encrypted blob — cannot read"],
+        "relay_b": ["Previous hop (Relay A)", "Next hop (Relay C)", "Encrypted blob — cannot read"],
+        "relay_c": ["Previous hop (Relay B)", "Recipient ID", "Encrypted envelope — cannot read content"]
+      },
+      "compromise_resistance": "An adversary must compromise all 3 relay nodes AND correlate timing to link sender and recipient. With Tor + decoy traffic this is computationally and practically infeasible.",
+      "relay_node_changes": {
+        "new_capability": "Relay nodes must support onion forwarding protocol — new in v1.5",
+        "forward_endpoint": "POST /relay/forward — accepts onion-encrypted packet, decrypts one layer, forwards to next hop",
+        "no_logging": "Forward operations never logged. Previous hop address zeroed from memory after forwarding.",
+        "circuit_ttl_seconds": 300,
+        "version_flag": "Relay nodes advertise multi-hop support in relay registry. Clients only use nodes that support it for multi-hop paths."
+      },
+      "circuit_construction": {
+        "library": "packages/relay-client handles circuit construction transparently",
+        "path_diversity": "No two hops in the same AS (Autonomous System) where possible",
+        "path_rotation": "New circuit constructed every 10 minutes or 100 messages, whichever comes first",
+        "guard_nodes": "First hop (guard) rotated less frequently — weekly — to reduce path discovery attacks"
+      }
+    },
+
+    "tor_first_architecture": {
+      "description": "Tor is the default connection method. Clearnet is the fallback with a visible warning indicator.",
+      "v1_vs_v15": {
+        "v1": "Default clearnet. Tor is opt-in.",
+        "v1_5": "Default Tor. Clearnet is fallback only, shown with warning indicator in UI."
+      },
+      "implementation": {
+        "web": "Connect via .onion address by default when accessed through Tor Browser. Detect Tor Browser and adjust automatically.",
+        "ios": "Integrate Tor.framework (Guardian Project) — runs Tor in-process, no Orbot dependency",
+        "android": "Embed Tor via NetCipher + Tor Android library — runs in-process, no Orbot dependency",
+        "fallback_indicator": "Connection mode badge in chat header: green lemon slice = Tor active, yellow = clearnet fallback, red = no connection"
+      },
+      "onion_service": {
+        "v2_onion": false,
+        "v3_onion": true,
+        "note": "v3 onion addresses only — v2 deprecated and insecure",
+        "self_hosted": "Server operator configures .onion address in server config. Published in app and docs.",
+        "onion_address_distribution": "Hardcoded in app binary + published in SECURITY_MODEL.md + verifiable via signed announcement"
+      },
+      "no_orbot_dependency": {
+        "rationale": "Requiring Orbot creates a dependency the user must install separately. In-process Tor means Sublemonable works out of the box with Tor protection even if user has never heard of Orbot.",
+        "ios_library": "Tor.framework by Guardian Project — battle tested, used by Onion Browser",
+        "android_library": "tor-android by Guardian Project — same lineage"
+      }
+    }
+  },
+
+  "v1_to_v15_migration": {
+    "user_impact": "Existing v1 users see a one-time update prompt. All existing messages and contacts carry over. New features opt-in except Tor-first which is the new default.",
+    "tor_default_rollout": "Tor-first shown as new default with brief explanation on first launch after update. User can switch to clearnet if Tor is blocked in their region.",
+    "second_passphrase_setup": "Optional. Prompted once during update with explanation: 'Add a second passphrase to create an alternate profile.' No pressure, fully skippable.",
+    "existing_accounts": "Unchanged. v1.5 is fully backwards compatible with v1 server.",
+    "server_changes": {
+      "new": [
+        "Dead drop endpoints — POST /api/v1/drops, POST /api/v1/drops/redeem",
+        "Multi-hop relay forwarding — POST /relay/forward on relay nodes",
+        "Relay capability advertisement — version flag in relay registry"
+      ],
+      "unchanged": [
+        "All existing message endpoints",
+        "All existing auth endpoints",
+        "All existing prekey endpoints",
+        "PostgreSQL schema — additive changes only"
+      ]
+    }
+  },
+
+  "build_order": {
+    "phase_1": {
+      "name": "Storage Layer — Plausible Deniability",
+      "why_first": "Everything else builds on top of the storage layer. Get this right before building features that depend on it.",
+      "deliverables": [
+        "Key slot architecture in packages/crypto — tryPassphrase(passphrase) -> VaultKey | null",
+        "Identical Argon2id timing for all passphrases — timing attack test included",
+        "Separate encrypted storage namespaces per vault on all platforms",
+        "Storage padding to normalize app storage size",
+        "Forensic protections — timestamp normalization, WAL encryption, secure delete",
+        "Second passphrase setup flow in all three apps",
+        "Decoy activity reminder system",
+        "Notification silencing when decoy vault active",
+        "Unit tests: vault isolation, timing parity, slot count non-disclosure"
+      ]
+    },
+    "phase_2": {
+      "name": "Tor-First Network",
+      "deliverables": [
+        "Embed Tor.framework in apps/ios",
+        "Embed tor-android library in apps/android",
+        "Web .onion address detection and auto-connect",
+        "Clearnet fallback with warning indicator",
+        "Connection mode badge in chat header UI",
+        "v3 onion address configuration in server",
+        "Tor bootstrap progress shown during first connect (lemon slice fills as Tor connects)"
+      ]
+    },
+    "phase_3": {
+      "name": "Dead Drop Mode",
+      "deliverables": [
+        "Dead drop server endpoints — deposit and redeem",
+        "Proof-of-work client implementation for deposit",
+        "One-time token generation in packages/crypto",
+        "QR code generation for drop token sharing",
+        "QR code scanning for drop redemption",
+        "Dead drop UI flow in all three apps",
+        "Ghost mode — all messages as dead drops",
+        "Integration tests: deposit, redeem, replay attack rejection, TTL expiry"
+      ]
+    },
+    "phase_4": {
+      "name": "Decoy Traffic",
+      "deliverables": [
+        "Background decoy envelope generator in packages/relay-client",
+        "Poisson interval distribution for timing randomization",
+        "iOS BGProcessingTask integration",
+        "Android WorkManager integration",
+        "Web Service Worker background sync",
+        "Battery impact monitoring and auto-reduce on low battery",
+        "Cover traffic intensity selector in settings UI (lemon slice fill level)",
+        "Verification: decoy envelopes indistinguishable from real in network capture"
+      ]
+    },
+    "phase_5": {
+      "name": "Multi-Hop Relay",
+      "deliverables": [
+        "Onion encryption layer in packages/crypto — 3-layer encrypt/decrypt",
+        "Circuit construction in packages/relay-client",
+        "Path selection algorithm — geographic diversity, AS diversity",
+        "Circuit rotation — 10 minutes or 100 messages",
+        "Relay node forward endpoint — POST /relay/forward",
+        "Relay capability flag in server",
+        "Multi-hop path indicator in settings UI",
+        "Integration tests: 3-hop delivery, single node compromise simulation",
+        "Performance tests: latency under multi-hop vs direct"
+      ]
+    },
+    "phase_6": {
+      "name": "Ghost Mode Integration + Polish",
+      "deliverables": [
+        "Ghost mode — ties all features together as one setting",
+        "Connection mode selector UI — Standard / Stealth / Ghost",
+        "Mode indicator in chat header — lemon slice segments show active layers",
+        "Decoy activity health check — warns if background tasks killed by OS",
+        "Full end-to-end Ghost mode test — verify no metadata leaks",
+        "Update docs/SECURITY_MODEL.md with full v1.5 onion diagram",
+        "Update CHANGELOG.md",
+        "Tag v1.5.0 release"
+      ]
+    }
+  },
+
+  "ui_additions": {
+    "connection_mode_badge": {
+      "location": "Chat header, right of contact name",
+      "standard": "Single lemon slice segment, green glow",
+      "stealth": "Three segments, amber glow",
+      "ghost": "All segments, slow pulse, white glow",
+      "clearnet_fallback": "Yellow warning dot, tooltip: 'Tor unavailable — using direct connection'"
+    },
+    "second_passphrase_setup": {
+      "entry_point": "Settings → Security → Add alternate profile",
+      "label": "Add a second passphrase",
+      "no_explanation_in_ui": true,
+      "confirmation": "Both passphrases confirmed, second vault initialized silently"
+    },
+    "dead_drop_ui": {
+      "create": "Long-press send button → 'Send as dead drop' option appears",
+      "qr_screen": "Full screen QR with lemon slice watermark, share sheet",
+      "redeem": "Main screen → compose button long-press → 'Redeem dead drop' → camera scan"
+    },
+    "cover_traffic_indicator": {
+      "location": "Settings → Privacy → Cover Traffic",
+      "visual": "Lemon slice with fill level showing intensity — 0 segments off, 3 segments medium, all 8 high"
+    },
+    "tor_bootstrap": {
+      "first_launch": "Lemon slice animates segment by segment as Tor bootstrap completes (0-100%)",
+      "subsequent_launches": "Silent — connects in background, badge updates when ready"
+    }
+  },
+
+  "fable_instructions": {
+    "note": "v1.5 blueprint — build AFTER v1 is merged and stable. Read sublemonable-MASTER.json first.",
+    "start_here": "Read sublemonable-MASTER.json and this file completely before writing a single line of code. v1.5 is additive — do not modify existing working features.",
+    "order": [
+      "1. Build key slot architecture and vault isolation in packages/crypto — timing parity tests mandatory",
+      "2. Add second vault setup flow and storage padding to all three apps and web",
+      "3. Add forensic protections — timestamp normalization, WAL encryption, secure delete on all platforms",
+      "4. Embed Tor.framework in iOS and tor-android in Android — in-process, no Orbot dependency",
+      "5. Implement Tor-first connection with clearnet fallback and connection mode badge",
+      "6. Add v3 onion address to server configuration",
+      "7. Build dead drop server endpoints with proof-of-work deposit",
+      "8. Build dead drop client flow — create, QR share, redeem — in all three apps",
+      "9. Build decoy traffic generator with Poisson timing in packages/relay-client",
+      "10. Integrate decoy traffic background tasks on iOS, Android, and web",
+      "11. Build onion encryption layer (3-layer) in packages/crypto",
+      "12. Build circuit construction and path selection in packages/relay-client",
+      "13. Add relay forward endpoint to server and relay nodes",
+      "14. Build Ghost mode — ties all features together with single setting",
+      "15. Build connection mode selector UI — Standard / Stealth / Ghost with lemon slice indicators",
+      "16. Full end-to-end Ghost mode integration test",
+      "17. Update SECURITY_MODEL.md with complete v1.5 onion diagram",
+      "18. Update CHANGELOG.md and tag v1.5.0"
+    ],
+    "critical_rules": [
+      "PLAUSIBLE DENIABILITY IS ONLY AS STRONG AS ITS WEAKEST IMPLEMENTATION — timing parity is non-negotiable",
+      "NEVER store the number of vaults anywhere — slot count must be unknowable",
+      "NEVER label second vault as hidden, secret, or deniable anywhere in UI or code comments visible to forensics",
+      "NEVER allow notification content to reveal real vault existence when decoy is active",
+      "DEAD DROP relay endpoint requires NO authentication — proof-of-work only — account auth would defeat anonymity",
+      "DECOY envelopes must be byte-for-byte indistinguishable from real envelopes — same padding, same Tor circuit, same relay nodes",
+      "TOR is now default — clearnet is fallback — never present clearnet as the primary option",
+      "MULTI-HOP path selection must never place two hops in the same AS — defeats the purpose",
+      "GHOST MODE must be tested with network capture to verify no metadata leaks before release",
+      "ALL v1 critical rules still apply — no logging, no plaintext, parameterized SQL, JWT validation etc",
+      "ARGON2ID parameters must be identical for all vault passphrases — no optimization shortcut on decoy path",
+      "MEMORY zeroing applies doubly in v1.5 — vault keys especially must never linger in RAM"
+    ],
+    "testing_requirements": [
+      "Timing attack test: 1000 passphrase attempts on vault A and vault B — mean and stddev must be statistically indistinguishable",
+      "Forensic test: after using real vault, switch to decoy — no file artifacts, no timestamps, no recoverable fragments",
+      "Network capture test: 60 seconds of Ghost mode traffic — real message send must be indistinguishable from decoy traffic",
+      "Multi-hop test: simulate Relay B compromise — verify sender and recipient remain unknown to Relay B",
+      "Dead drop replay test: redeeming same token twice must return 404 on second attempt",
+      "Notification test: receive message on real vault while decoy active — no visible notification reveals real vault"
+    ]
+  }
+}
