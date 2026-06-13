@@ -16,6 +16,7 @@
   "dependencies": {
     "@sublemonable/crypto": "workspace:*",
     "@sublemonable/protocol": "workspace:*",
+    "@sublemonable/relay-client": "workspace:*",
     "@sublemonable/ui": "workspace:*",
     "idb": "^8.0.0",
     "react": "^18.3.1",

@@ -3,7 +3,14 @@
 // See the LICENSE file in the repository root for full license text.
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { PreKeyBundle, RegistrationRequest, PreKeyUploadRequest } from "@sublemonable/protocol";
+import type {
+  PreKeyBundle,
+  RegistrationRequest,
+  PreKeyUploadRequest,
+  DropDepositRequest,
+  DropDepositResponse,
+  DropRedeemResponse,
+} from "@sublemonable/protocol";
 
 export const SERVER_URL: string =
   (import.meta.env.VITE_SERVER_URL as string | undefined) ?? "http://localhost:8443";
@@ -70,7 +77,10 @@ export const api = {
     return request(`/api/v1/users/${encodeURIComponent(userId)}/prekey`, {}, token);
   },
 
-  uploadPrekeys(body: PreKeyUploadRequest & { signed_prekey?: unknown }, token: string): Promise<void> {
+  uploadPrekeys(
+    body: PreKeyUploadRequest & { signed_prekey?: unknown },
+    token: string,
+  ): Promise<void> {
     return request("/api/v1/prekeys", { method: "POST", body: JSON.stringify(body) }, token);
   },
 
@@ -80,5 +90,14 @@ export const api = {
 
   deleteAccount(token: string): Promise<void> {
     return request("/api/v1/account", { method: "DELETE" }, token);
+  },
+
+  // Dead drops (v1.5) — no auth: proof-of-work on deposit, token on redeem.
+  depositDrop(body: DropDepositRequest): Promise<DropDepositResponse> {
+    return request("/api/v1/drops", { method: "POST", body: JSON.stringify(body) });
+  },
+
+  redeemDrop(token: string): Promise<DropRedeemResponse> {
+    return request("/api/v1/drops/redeem", { method: "POST", body: JSON.stringify({ token }) });
   },
 };

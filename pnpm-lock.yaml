@@ -27,6 +27,9 @@ importers:
       '@sublemonable/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@sublemonable/relay-client':
+        specifier: workspace:*
+        version: link:../../packages/relay-client
       '@sublemonable/ui':
         specifier: workspace:*
         version: link:../../packages/ui
