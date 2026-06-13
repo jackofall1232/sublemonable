@@ -8,7 +8,7 @@
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-F5E642.svg)](LICENSE)
 [![Build](https://img.shields.io/github/actions/workflow/status/jackofall1232/sublemonable/ci.yml?branch=main)](.github/workflows/ci.yml)
-[![Platforms](https://img.shields.io/badge/Platforms-iOS%20%7C%20Android%20%7C%20Browser-F5E642.svg)](#platforms)
+[![Platforms](https://img.shields.io/badge/Platforms-iOS%20%7C%20Android%20%7C%20Linux%20%7C%20Browser-F5E642.svg)](#platforms)
 [![Encryption](https://img.shields.io/badge/Encryption-Signal%20Protocol-F5E642.svg)](docs/SECURITY_MODEL.md)
 
 </div>
@@ -45,6 +45,7 @@ Full details in [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
 - 📵 Screenshot protection — hard block on Android, instant blur on iOS and browser
 - 🫥 Invisible watermarking for leak attribution
 - 🪪 No phone number, email, or name required
+- 🖥️ Native Linux desktop app — .deb, .AppImage, .rpm — with libsecret key storage and focus-loss screenshot blur
 
 ### v1.5 — the security onion
 
@@ -68,6 +69,7 @@ See [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) for the full onion diagram.
 | Browser | React 18 + Vite, PWA | [`apps/web`](apps/web) |
 | iOS 16+ | SwiftUI + libsignal-client | [`apps/ios`](apps/ios) |
 | Android 8+ | Jetpack Compose + libsignal-client | [`apps/android`](apps/android) |
+| Linux (Debian/Ubuntu/Kali) | Tauri v2 + Rust, .deb/.AppImage/.rpm | [`apps/desktop`](apps/desktop) |
 | Server | Go 1.25+ · Fiber · PostgreSQL 16 | [`server`](server) |
 
 ## Getting started

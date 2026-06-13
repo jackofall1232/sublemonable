@@ -1,0 +1,12 @@
+{
+  "name": "@sublemonable/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sublemonable Linux desktop app — Tauri v2 (frontend is apps/web)",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "cargo tauri dev",
+    "build": "cargo tauri build --bundles deb,appimage,rpm",
+    "tauri": "cargo tauri"
+  }
+}

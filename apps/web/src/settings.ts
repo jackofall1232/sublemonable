@@ -19,6 +19,7 @@ import {
   type RevealMode,
   type TransportState,
 } from "@sublemonable/protocol";
+import { isTauri } from "@sublemonable/crypto";
 import { create } from "zustand";
 
 const STORAGE_KEY = "sublemonable.settings.v1_5";
@@ -124,3 +125,26 @@ export const useSettings = create<SettingsState>((set, get) => {
     },
   };
 });
+
+// In the Tauri desktop app the Rust backend probes for a local Tor SOCKS proxy
+// on startup and emits `connection-mode-changed` ({ mode: "tor" | "clearnet" }).
+// Mirror it into the transport state so the connection-mode badge reflects real
+// routing — in a browser this listener is never registered and the existing
+// `.onion`-hostname heuristic stands.
+if (isTauri()) {
+  interface TauriEventApi {
+    listen: (
+      event: string,
+      handler: (event: { payload: { mode?: string } }) => void,
+    ) => Promise<unknown>;
+  }
+  const tauri = (window as unknown as { __TAURI__?: { event?: TauriEventApi } }).__TAURI__;
+  void tauri?.event
+    ?.listen("connection-mode-changed", (event) => {
+      const transport: TransportState = event.payload?.mode === "tor" ? "tor" : "clearnet_fallback";
+      useSettings.getState().setTransport(transport);
+    })
+    .catch(() => {
+      /* event bridge unavailable — keep the default transport state */
+    });
+}

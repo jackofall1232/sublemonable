@@ -64,6 +64,11 @@ The server's role is reduced to three functions:
   biometric-protected (Face ID / Touch ID).
 - **Android:** Android Keystore System, hardware-backed where the device supports it; remaining
   local data in EncryptedSharedPreferences.
+- **Linux:** Keys stored via the Secret Service API (GNOME Keyring on GNOME desktops, KWallet on
+  KDE) using the secret-service Rust crate. If no Secret Service daemon is running, an
+  Argon2id+AES-256-GCM encrypted file is used at $XDG_DATA_HOME/sublemonable/vault.bin. The
+  encryption is performed by packages/crypto (libsodium.js) before the vault blob reaches the Rust
+  storage layer — Rust is a storage adapter only.
 
 ## What the server stores — and provably cannot store
 
@@ -109,6 +114,7 @@ purged after 7 days.
 | Android | `WindowManager.LayoutParams.FLAG_SECURE` on every Activity with message content | OS-level hard block — captures show black |
 | iOS | `UIScreen.capturedDidChangeNotification` → instant blur overlay; `userDidTakeScreenshotNotification` → warning banner | Real-time blur for recording; detection (not prevention) for stills |
 | Web | `visibilitychange` + window blur → `filter: blur(24px) grayscale(1)` on the message container within 120 ms | Best-effort — full OS-level prevention is out of scope in a browser |
+| Linux (Wayland & X11) | Focus-loss blur overlay (same mechanism as the browser) | Best-effort — no compositor-agnostic API exists on Linux to hard-block screen capture |
 
 The web client additionally embeds an **invisible watermark** (canvas steganography encoding
 `recipient_id` + timestamp into message backgrounds) so a leaked screenshot can be attributed to
@@ -138,7 +144,9 @@ the recipient who leaked it.
 
 - A compromised device (OS-level keyloggers)
 - Rubber-hose cryptanalysis
-- Full OS-level screenshot prevention in a browser
+- Full OS-level screenshot prevention in a browser or on Linux desktop (Linux exposes no
+  compositor-agnostic hard-block API; the desktop app falls back to the same best-effort blur as
+  the browser)
 
 ## Tor routing
 
@@ -146,6 +154,11 @@ In v1.0, Tor is opt-in, not default. Mobile clients integrate with Orbot; browse
 the deployment's `.onion` address via Tor Browser. The server ships an optional nginx + tor hidden
 service configuration (`docker-compose.tor.yml`). **As of v1.5 this is inverted — Tor is the default
 transport and clearnet is a flagged fallback; see the Tor-first section below.**
+
+On Linux desktop, the app attempts Tor routing by default via a local tor daemon (port 9050) or Tor
+Browser (port 9150). For full Tor routing without a running tor daemon, launch via: `torsocks
+sublemonable`. The connection-mode badge shows Tor status — a yellow dot indicates clearnet fallback
+is active.
 
 ## Contact verification
 
