@@ -9,4 +9,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **v1.5 — the security onion.** Five layered defenses, each assuming the one beneath it has failed:
+  - **Plausible deniability**: key-slot vaults with a never-stored vault count and identical
+    Argon2id timing on every passphrase path (`packages/crypto` `vault`).
+  - **Dead-drop mode**: anonymous deposit under `SHA-256(token)` with no sender field, gated by a
+    hashcash proof-of-work instead of an account; single-use redeem; 72-hour TTL purge.
+  - **Decoy (cover) traffic**: Poisson-timed fake envelopes, padded to the same 256-byte block as
+    real messages and sent over the same path, with low-battery back-off (`packages/relay-client`).
+  - **Multi-hop relay**: 3-layer onion encryption with AS/geographic-diverse path selection, guard
+    pinning, and 100-message / 10-minute circuit rotation; server `/relay/forward` peels one layer.
+  - **Tor-first architecture**: Tor is the default transport; clearnet is a flagged fallback.
+  - **Standard / Stealth / Ghost** connection modes composing the network layer.
+  - **Privacy view**: frosted-lemon blur with hold / tap-timed / tap-toggle reveal modes.
+  - **Platform warning**: honest, dismissible notice when a participant is on a browser.
+  - 256-byte message padding, and an encrypted `contact.info` signal for real-time platform exchange.
+- New `@sublemonable/relay-client` package (decoy scheduler, circuit construction, path selection).
+- UI reconciled from the `lemon-ui.jsx` brainstorm into the dark design system: progressive
+  lemon-wheel fill, bouncing-drop typing indicator, and the squeeze send button.
+
+## [1.0.0]
+
+### Added
+
 - Initial release
