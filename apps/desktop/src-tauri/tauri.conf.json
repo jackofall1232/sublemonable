@@ -40,7 +40,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "category": "Communication",
+    "category": "SocialNetworking",
     "shortDescription": "Zero-knowledge E2EE ephemeral messaging",
     "longDescription": "Sublemonable is end-to-end encrypted ephemeral messaging. Every message is encrypted on your device before it leaves. Messages burn on read or self-destruct on a timer. Zero-knowledge server — plaintext never leaves your device.",
     "linux": {
