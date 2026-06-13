@@ -24,6 +24,11 @@ func Verify(challenge, nonce []byte, difficulty int) bool {
 	if len(nonce) != NonceBytes {
 		return false
 	}
+	// A negative difficulty is nonsensical (and HasLeadingZeroBits would treat it
+	// as already satisfied). Fail closed rather than accept any nonce.
+	if difficulty < 0 {
+		return false
+	}
 	h := sha256.New()
 	h.Write(challenge)
 	h.Write(nonce)

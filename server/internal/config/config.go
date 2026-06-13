@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -23,11 +24,12 @@ type Config struct {
 	RateLimitEnabled           bool
 	TorEnabled                 bool
 	// v1.5 — Tor-first + dead drops + multi-hop relay.
-	OnionAddress      string // v3 .onion address this deployment is reachable at
-	DropTTLHours      int    // dead-drop lifetime, collected or not
-	DropPoWDifficulty int    // leading zero bits required on deposit proof-of-work
-	RelayPrivateKey   string // base64 Curve25519 private key; enables /relay/forward when set
-	RelayPublicKey    string // base64 Curve25519 public key advertised in the relay registry
+	OnionAddress      string   // v3 .onion address this deployment is reachable at
+	DropTTLHours      int      // dead-drop lifetime, collected or not
+	DropPoWDifficulty int      // leading zero bits required on deposit proof-of-work
+	RelayPrivateKey   string   // base64 Curve25519 private key; enables /relay/forward when set
+	RelayPublicKey    string   // base64 Curve25519 public key advertised in the relay registry
+	RelayPeers        []string // allowlist of next-hop forward URLs; forwarding fails closed otherwise
 }
 
 func Load() (*Config, error) {
@@ -47,6 +49,12 @@ func Load() (*Config, error) {
 		DropPoWDifficulty:          envInt("DROP_POW_DIFFICULTY", 20),
 		RelayPrivateKey:            os.Getenv("RELAY_PRIVATE_KEY"),
 		RelayPublicKey:             os.Getenv("RELAY_PUBLIC_KEY"),
+		RelayPeers:                 splitCSV(os.Getenv("RELAY_PEERS")),
+	}
+	// A negative proof-of-work difficulty would make every nonce "valid" — never
+	// trust a misconfigured value; fall back to the secure default.
+	if cfg.DropPoWDifficulty < 0 {
+		cfg.DropPoWDifficulty = 20
 	}
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
@@ -55,6 +63,21 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("JWT_PRIVATE_KEY_PATH and JWT_PUBLIC_KEY_PATH are required")
 	}
 	return cfg, nil
+}
+
+// splitCSV parses a comma-separated env value into a trimmed, non-empty list.
+func splitCSV(v string) []string {
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func envInt(key string, fallback int) int {

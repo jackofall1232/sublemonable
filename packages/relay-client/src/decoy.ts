@@ -14,7 +14,7 @@
  * nowhere, so the relay holds it briefly and the TTL purges it, undelivered.
  */
 
-import { pad, randomBytes, toBase64 } from "@sublemonable/crypto";
+import { aeadEncrypt, pad, randomBytes, toBase64 } from "@sublemonable/crypto";
 import {
   PROTOCOL_VERSION,
   type CoverTrafficIntensity,
@@ -29,20 +29,30 @@ function randomUuid(): string {
 }
 
 /**
- * Build a single decoy envelope. Its ciphertext is random bytes padded to the
- * same 256-byte block boundary a real message uses, so size analysis cannot
- * separate it from genuine traffic. `senderId` matches real envelopes so the
- * sender field is not itself a tell.
+ * Build a single decoy envelope, byte-for-byte indistinguishable from a real one.
+ *
+ * A real ciphertext is the Double Ratchet blob `ratchet_pub(32) || nonce(12) ||
+ * AEAD(plaintext)`, where the plaintext is padded to a 256-byte block. We
+ * reproduce that exact shape: a random 32-byte "ratchet key", then an AEAD
+ * encryption (under a throwaway random key) of a 256-byte-padded random body.
+ * AEAD output is indistinguishable from random, so the result matches a genuine
+ * single-block message in both structure and length (316 bytes). The recipient
+ * is a random UUID that resolves nowhere; the relay holds it until the TTL purges
+ * it, undelivered.
  */
 export async function makeDecoyEnvelope(senderId: string): Promise<MessageEnvelope> {
-  // A plausible short-message-sized random body, padded like the real thing.
+  const ratchetKey = await randomBytes(32);
+  const throwawayKey = await randomBytes(32);
   const body = await randomBytes(16 + Math.floor(Math.random() * 64));
-  const ciphertext = await toBase64(await pad(body));
+  const box = await aeadEncrypt(throwawayKey, await pad(body)); // nonce(12)+ct+tag(16)
+  const blob = new Uint8Array(ratchetKey.length + box.length);
+  blob.set(ratchetKey, 0);
+  blob.set(box, ratchetKey.length);
   return {
     id: randomUuid(),
     sender_id: senderId,
     recipient_id: randomUuid(), // resolves to nowhere — never delivered
-    ciphertext,
+    ciphertext: await toBase64(blob),
     ephemeral_key: null,
     prekey_id: null,
     message_number: 0,
@@ -151,42 +161,19 @@ export class DecoyScheduler {
     }
     this.handle = this.timer.setTimeout(() => {
       if (!this.running) return;
-      void this.submit(makeDecoyEnvelopeBound(this.senderId));
+      void this.emitOnce();
       this.scheduleNext();
     }, delay);
   }
-}
 
-// Synchronous binding helper kept separate so scheduleNext stays terse. Returns a
-// promise the caller may ignore; submission errors are the caller's concern.
-function makeDecoyEnvelopeBound(senderId: string): MessageEnvelope {
-  // A lightweight synchronous decoy: random-ish ciphertext at a fixed 256-byte
-  // block. (The async makeDecoyEnvelope is used where real entropy/padding from
-  // libsodium is desired; the scheduler path stays synchronous for the timer.)
-  const filler = base64Block();
-  return {
-    id: crypto.randomUUID(),
-    sender_id: senderId,
-    recipient_id: crypto.randomUUID(),
-    ciphertext: filler,
-    ephemeral_key: null,
-    prekey_id: null,
-    message_number: 0,
-    previous_chain_length: 0,
-    timestamp: new Date().toISOString(),
-    ttl_seconds: null,
-    burn_on_read: false,
-    media_type: "text",
-    version: PROTOCOL_VERSION,
-  };
-}
-
-// One 256-byte block of base64 random bytes via WebCrypto (available in browser,
-// Node ≥ 20, and Workers — the environments the scheduler runs in).
-function base64Block(): string {
-  const bytes = new Uint8Array(256);
-  crypto.getRandomValues(bytes);
-  let bin = "";
-  for (const b of bytes) bin += String.fromCharCode(b);
-  return btoa(bin);
+  // Build and submit one decoy. Errors are contained: cover traffic is
+  // best-effort, and a failed submission must never surface as an unhandled
+  // rejection or crash the scheduler — drop it and let the next tick continue.
+  private async emitOnce(): Promise<void> {
+    try {
+      await this.submit(await makeDecoyEnvelope(this.senderId));
+    } catch {
+      /* swallow — cover traffic is best-effort by design */
+    }
+  }
 }

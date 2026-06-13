@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -44,7 +45,14 @@ func (f httpForwarder) Forward(ctx context.Context, nextHop string, packet []byt
 	if err != nil {
 		return err
 	}
-	return resp.Body.Close()
+	defer resp.Body.Close()
+	// A 2xx from the next hop means it accepted the packet. Anything else — a
+	// disabled endpoint, a malformed inner packet, an upstream error — is a
+	// failed forward and must surface as such, not be silently dropped.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("next hop returned status %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // DefaultForwarder forwards over HTTP with a bounded timeout.
@@ -81,6 +89,14 @@ func (h *Handlers) RelayForward(c *fiber.Ctx) error {
 	}
 
 	if peeled.NextHop != "" {
+		// SSRF guard: the next hop comes from a decrypted packet that ANYONE can
+		// seal to this relay's public key. Only forward to next hops on the
+		// operator-configured allowlist — never to an arbitrary URL (which could
+		// point at loopback, link-local metadata endpoints, or internal services).
+		// Fail closed: with no allowlist, this relay forwards nowhere.
+		if !h.relayPeers[peeled.NextHop] {
+			return errJSON(c, fiber.StatusBadRequest, "bad_next_hop")
+		}
 		// Forward one hop onward. The previous hop is not retained.
 		if err := h.forwarder.Forward(c.Context(), peeled.NextHop, peeled.Payload); err != nil {
 			return errJSON(c, fiber.StatusBadGateway, "forward_failed")

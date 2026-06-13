@@ -12,7 +12,7 @@
  * The send button is ALWAYS lemon yellow with a dark glyph — never inverted.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { LemonSlice } from "./LemonSlice.js";
 import { color, motion } from "./tokens.js";
 
@@ -37,23 +37,29 @@ export function SendButton({
   onLongPress,
 }: SendButtonProps) {
   const [pressed, setPressed] = useState(false);
-  const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks whether the long-press already fired, so release does NOT also fire
+  // onSend — otherwise a long-press would send both as a dead drop AND normally.
+  const longPressed = useRef(false);
 
   const beginPress = () => {
     setPressed(true);
+    longPressed.current = false;
     if (onLongPress) {
-      setLongPressTimer(setTimeout(() => onLongPress(), LONG_PRESS_MS));
+      longPressTimer.current = setTimeout(() => {
+        longPressed.current = true;
+        longPressTimer.current = null;
+        onLongPress();
+      }, LONG_PRESS_MS);
     }
   };
   const endPress = (fire: boolean) => {
     setPressed(false);
-    if (longPressTimer) {
-      clearTimeout(longPressTimer);
-      setLongPressTimer(null);
-      if (fire && !disabled && !sending) onSend();
-    } else if (fire && !disabled && !sending) {
-      onSend();
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
     }
+    if (fire && !disabled && !sending && !longPressed.current) onSend();
   };
 
   return (

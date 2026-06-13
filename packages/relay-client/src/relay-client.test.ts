@@ -38,12 +38,19 @@ describe("poisson timing", () => {
 });
 
 describe("decoy envelopes", () => {
-  it("are padded to a 256-byte block — indistinguishable in size from real", async () => {
+  it("match a real ratchet blob in shape and length — indistinguishable from real", async () => {
     const env = await makeDecoyEnvelope("11111111-1111-4111-8111-111111111111");
     const raw = await fromBase64(env.ciphertext);
-    expect(raw.length % 256).toBe(0);
+    // ratchet_pub(32) || nonce(12) || AEAD(256-byte-padded plaintext)+tag(16) = 316
+    expect(raw.length).toBe(32 + 12 + 256 + 16);
     expect(env.media_type).toBe("text");
     expect(env.version).toBe("1");
+  });
+
+  it("two decoys differ — encrypted, not a fixed/structured filler", async () => {
+    const a = await makeDecoyEnvelope("11111111-1111-4111-8111-111111111111");
+    const b = await makeDecoyEnvelope("11111111-1111-4111-8111-111111111111");
+    expect(a.ciphertext).not.toBe(b.ciphertext);
   });
 
   it("scheduler emits decoys on its cadence and stops cleanly", () => {

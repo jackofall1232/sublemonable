@@ -17,10 +17,13 @@ import {
   generateOneTimePrekeys,
   generateSalt,
   generateSignedPrekey,
+  identityKeyToX25519,
+  openSealed,
   pad,
   ratchetDecrypt,
   ratchetEncrypt,
   safetyNumber,
+  sealTo,
   signWithIdentity,
   solveProofOfWork,
   toBase64,
@@ -271,7 +274,7 @@ export const useApp = create<AppState>((set, get) => {
           id: envelope.id,
           peerId: envelope.sender_id,
           direction: "received",
-          text: utf8Decode(plaintextProbe),
+          text: utf8Decode(unpad(plaintextProbe)),
           timestamp: envelope.timestamp,
           ttlSeconds: envelope.ttl_seconds,
           burnOnRead: envelope.burn_on_read,
@@ -313,7 +316,7 @@ export const useApp = create<AppState>((set, get) => {
                 id: envelope.id,
                 peerId: envelope.sender_id,
                 direction: "received",
-                text: utf8Decode(plaintext),
+                text: utf8Decode(unpad(plaintext)),
                 timestamp: envelope.timestamp,
                 ttlSeconds: envelope.ttl_seconds,
                 burnOnRead: envelope.burn_on_read,
@@ -485,7 +488,9 @@ export const useApp = create<AppState>((set, get) => {
       if (!contact || !accountId || !ws) return;
 
       const session = deserializeSession(contact.session);
-      const encrypted = await ratchetEncrypt(session, utf8Encode(text));
+      // Pad the plaintext to a 256-byte block before encrypting so ciphertext
+      // length leaks nothing — and so decoy traffic is the same size as real.
+      const encrypted = await ratchetEncrypt(session, await pad(utf8Encode(text)));
       contact.session = serializeSession(session);
       set((s) => ({ contacts: { ...s.contacts, [peerId]: { ...contact } } }));
 
@@ -528,7 +533,9 @@ export const useApp = create<AppState>((set, get) => {
       // Encrypt exactly as a normal message — the dead drop carries a full
       // envelope so the recipient decrypts it with the established session.
       const session = deserializeSession(contact.session);
-      const encrypted = await ratchetEncrypt(session, utf8Encode(text));
+      // Pad the plaintext to a 256-byte block before encrypting so ciphertext
+      // length leaks nothing — and so decoy traffic is the same size as real.
+      const encrypted = await ratchetEncrypt(session, await pad(utf8Encode(text)));
       contact.session = serializeSession(session);
       set((s) => ({ contacts: { ...s.contacts, [peerId]: { ...contact } } }));
 
@@ -548,9 +555,13 @@ export const useApp = create<AppState>((set, get) => {
         version: PROTOCOL_VERSION,
       };
 
-      // Pad the serialized envelope to a 256-byte block so the deposit size
-      // reveals nothing, then deposit under a one-time token with proof-of-work.
-      const padded = await pad(utf8Encode(JSON.stringify(envelope)));
+      // Seal the ENTIRE envelope — sender_id, recipient_id, ratchet headers and
+      // all — to the recipient's identity key, then pad. The relay (and anyone
+      // who reads the stored row) sees only an opaque sealed box: no metadata
+      // links the two parties. The recipient is the only one who can open it.
+      const recipientX25519 = await identityKeyToX25519(unb64(contact.identityKey));
+      const sealed = await sealTo(recipientX25519, utf8Encode(JSON.stringify(envelope)));
+      const padded = await pad(sealed);
       const { token, dropId } = await generateDropToken();
       const powNonce = await solveProofOfWork(dropId, DROP_POW_DIFFICULTY);
       await api.depositDrop({
@@ -577,9 +588,14 @@ export const useApp = create<AppState>((set, get) => {
     },
 
     async redeemDeadDrop(tokenB64) {
+      const { keyStore } = get();
+      if (!keyStore) throw new Error("locked");
       const { ciphertext } = await api.redeemDrop(tokenB64.trim());
-      const padded = await fromBase64(ciphertext);
-      const envelope = parseEnvelope(JSON.parse(utf8Decode(unpad(padded))));
+      // Unpad, then open the sealed box with our identity's X25519 keypair.
+      const sealed = unpad(await fromBase64(ciphertext));
+      const identity = deserializeIdentity(keyStore.identityKey as unknown as SerializedIdentity);
+      const opened = await openSealed(identity.x25519PublicKey, identity.x25519PrivateKey, sealed);
+      const envelope = parseEnvelope(JSON.parse(utf8Decode(opened)));
       // Reuse the normal inbound path to establish/advance the session and
       // surface the message.
       handleServerEvent({ type: "message.deliver", envelope });

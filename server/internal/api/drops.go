@@ -97,8 +97,13 @@ func (h *Handlers) RedeemDrop(c *fiber.Ctx) error {
 	dropID := sha256.Sum256(token)
 	ciphertext, err := h.store.RedeemDrop(c.Context(), dropID[:])
 	if err != nil {
-		// No row, already redeemed, or expired — all indistinguishable.
-		return errJSON(c, fiber.StatusNotFound, "not_found")
+		// Missing, already redeemed, or expired are all 404 and indistinguishable
+		// (token validity stays opaque). A real store failure is a 500 so genuine
+		// incidents are not hidden behind a "not found".
+		if errors.Is(err, db.ErrNoRows) {
+			return errJSON(c, fiber.StatusNotFound, "not_found")
+		}
+		return errJSON(c, fiber.StatusInternalServerError, "store_failed")
 	}
 	return c.JSON(fiber.Map{
 		"ciphertext": base64.StdEncoding.EncodeToString(ciphertext),

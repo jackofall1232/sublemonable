@@ -87,3 +87,4 @@ export {
   type OnionHop,
   type PeeledLayer,
 } from "./onion.js";
+export { sealTo, openSealed } from "./sealedbox.js";

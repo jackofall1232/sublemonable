@@ -33,6 +33,9 @@ type Handlers struct {
 	// relayKey is non-nil only when this deployment is configured as a relay node.
 	relayKey  *relay.KeyPair
 	forwarder Forwarder
+	// relayPeers is the allowlist of next-hop forward URLs this relay may forward
+	// to. Empty means forwarding is refused (fail closed) — an SSRF guard.
+	relayPeers map[string]bool
 }
 
 func New(store *db.Store, issuer *auth.Issuer, cfg *config.Config) *Handlers {
@@ -44,10 +47,19 @@ func New(store *db.Store, issuer *auth.Issuer, cfg *config.Config) *Handlers {
 		prekeyLimit:   ratelimit.New(50, time.Minute, cfg.RateLimitEnabled),
 		// Dead drops are unauthenticated — proof-of-work is the main cost, but a
 		// per-IP cap blunts abuse from a single source too.
-		dropLimit: ratelimit.New(60, time.Minute, cfg.RateLimitEnabled),
-		relayKey:  loadRelayKey(cfg),
-		forwarder: DefaultForwarder(),
+		dropLimit:  ratelimit.New(60, time.Minute, cfg.RateLimitEnabled),
+		relayKey:   loadRelayKey(cfg),
+		forwarder:  DefaultForwarder(),
+		relayPeers: relayPeerSet(cfg.RelayPeers),
 	}
+}
+
+func relayPeerSet(peers []string) map[string]bool {
+	set := make(map[string]bool, len(peers))
+	for _, p := range peers {
+		set[p] = true
+	}
+	return set
 }
 
 // RelayEnabled reports whether this deployment serves /relay/forward.

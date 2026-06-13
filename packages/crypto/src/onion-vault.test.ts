@@ -24,6 +24,8 @@ import {
   verifyProofOfWork,
 } from "./deaddrop.js";
 import { buildOnion, generateRelayKeyPair, peelOnion, type OnionHop } from "./onion.js";
+import { openSealed, sealTo } from "./sealedbox.js";
+import { generateIdentityKeyPair, identityKeyToX25519 } from "./keys.js";
 
 // A fast, deterministic stand-in for Argon2id so timing-parity structure can be
 // asserted without paying the real KDF cost. It records every invocation.
@@ -162,6 +164,24 @@ describe("3-hop onion encryption", () => {
     const atC = await peelOnion(c, atB.payload);
     expect(atC.nextHop).toBeNull(); // innermost — payload is delivered content
     expect(utf8Decode(atC.payload)).toBe("dead drop through three hops");
+  });
+
+  it("seals a whole envelope to a recipient's identity key — opaque to others", async () => {
+    const recipient = await generateIdentityKeyPair();
+    const stranger = await generateIdentityKeyPair();
+    const recipientX = await identityKeyToX25519(recipient.publicKey);
+    const envelope = utf8Encode(
+      JSON.stringify({ sender_id: "alice", recipient_id: "bob", ciphertext: "..." }),
+    );
+
+    const sealed = await sealTo(recipientX, envelope);
+    // The recipient opens it with their own X25519 keypair.
+    const opened = await openSealed(recipient.x25519PublicKey, recipient.x25519PrivateKey, sealed);
+    expect(utf8Decode(opened)).toContain("alice");
+    // Anyone else (the relay, an eavesdropper) cannot.
+    await expect(
+      openSealed(stranger.x25519PublicKey, stranger.x25519PrivateKey, sealed),
+    ).rejects.toThrow();
   });
 
   it("a relay cannot peel a layer sealed for a different relay", async () => {

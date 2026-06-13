@@ -87,6 +87,14 @@ export function ChatView({ peerId, onVerify }: { peerId: string; onVerify: () =>
       .catch(() => setDropToken(null));
   };
 
+  // In Ghost mode every message is a dead drop — no direct channel exists. The
+  // primary send action therefore routes through the dead-drop path, not the
+  // direct WebSocket envelope, so the persistent recipient is never exposed.
+  const ghost = connectionMode === "ghost";
+  const onPrimarySend = ghost
+    ? onSendDeadDrop
+    : (text: string) => void sendMessage(peerId, text, { ttlSeconds: ttl, burnOnRead });
+
   return (
     <section className="flex h-full flex-1 flex-col bg-bg-primary">
       <header className="flex items-center justify-between border-b border-line px-4 py-3">
@@ -135,6 +143,7 @@ export function ChatView({ peerId, onVerify }: { peerId: string; onVerify: () =>
             active={privacyActive}
             revealMode={privacyView.revealMode}
             tapTimedSeconds={privacyView.tapTimedSeconds}
+            onReveal={() => openMessage(peerId, m.id)}
           >
             <MessageBubble
               direction={m.direction}
@@ -183,8 +192,9 @@ export function ChatView({ peerId, onVerify }: { peerId: string; onVerify: () =>
       </div>
 
       <ComposeBar
-        onSend={(text) => void sendMessage(peerId, text, { ttlSeconds: ttl, burnOnRead })}
-        onSendAsDeadDrop={onSendDeadDrop}
+        onSend={onPrimarySend}
+        onSendAsDeadDrop={ghost ? undefined : onSendDeadDrop}
+        placeholder={ghost ? "Message (dead drop)" : "Message"}
       />
 
       {dropToken && <DeadDropTokenModal token={dropToken} onClose={() => setDropToken(null)} />}

@@ -35,6 +35,10 @@ export interface PrivacyViewProps {
   /** Auto-re-blur duration for tap_timed, in seconds. */
   tapTimedSeconds?: number;
   children: React.ReactNode;
+  /** Fired the first time the content is revealed — lets the parent mark the
+   *  message opened (and trigger burn-on-read), which it otherwise can't see
+   *  because reveal state is managed inside this component. */
+  onReveal?: () => void;
 }
 
 export function PrivacyView({
@@ -42,6 +46,7 @@ export function PrivacyView({
   revealMode,
   tapTimedSeconds = 10,
   children,
+  onReveal,
 }: PrivacyViewProps) {
   const [revealed, setRevealed] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -62,17 +67,26 @@ export function PrivacyView({
 
   const hold = revealMode === "hold_to_reveal";
 
-  const onHoldStart = () => hold && setRevealed(true);
+  // Revealing — by any mode — counts as opening the message; notify the parent.
+  const reveal = () => {
+    setRevealed(true);
+    onReveal?.();
+  };
+
+  const onHoldStart = () => hold && reveal();
   const onHoldEnd = () => hold && setRevealed(false);
 
   const onTap = () => {
     if (hold) return;
     if (revealMode === "tap_toggle") {
-      setRevealed((r) => !r);
+      setRevealed((r) => {
+        if (!r) onReveal?.();
+        return !r;
+      });
       return;
     }
     // tap_timed: reveal, then auto re-blur.
-    setRevealed(true);
+    reveal();
     clearTimer();
     timer.current = setTimeout(() => setRevealed(false), Math.max(1, tapTimedSeconds) * 1000);
   };
