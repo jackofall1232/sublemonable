@@ -46,13 +46,27 @@ export interface PresenceUpdateEvent {
   ciphertext: string;
 }
 
+/**
+ * Encrypted contact/conversation info signal (v1.5). Carries the sender's
+ * current platform so the recipient can show the platform-warning badge, plus
+ * any other conversation metadata. The payload is encrypted — the server relays
+ * it verbatim and never learns the platform from message content. Used for the
+ * real-time platform-warning update when a contact switches clients.
+ */
+export interface ContactInfoEvent {
+  type: "contact.info";
+  peer_id: string;
+  ciphertext: string;
+}
+
 export type ClientEvent =
   | MessageSendEvent
   | MessageAckEvent
   | MessageBurnEvent
   | TypingStartEvent
   | TypingStopEvent
-  | PresenceUpdateEvent;
+  | PresenceUpdateEvent
+  | ContactInfoEvent;
 
 // ── Server → client ──────────────────────────────────────────────────────────
 
@@ -91,10 +105,11 @@ export type ServerEvent =
   | PrekeyLowEvent
   | SessionRevokedEvent
   | ErrorEvent
-  // typing/presence signals are relayed to the peer verbatim
+  // typing/presence/contact signals are relayed to the peer verbatim
   | TypingStartEvent
   | TypingStopEvent
-  | PresenceUpdateEvent;
+  | PresenceUpdateEvent
+  | ContactInfoEvent;
 
 export const CLIENT_EVENT_TYPES = [
   "message.send",
@@ -103,6 +118,7 @@ export const CLIENT_EVENT_TYPES = [
   "typing.start",
   "typing.stop",
   "presence.update",
+  "contact.info",
 ] as const;
 
 export const SERVER_EVENT_TYPES = [
@@ -114,4 +130,5 @@ export const SERVER_EVENT_TYPES = [
   "typing.start",
   "typing.stop",
   "presence.update",
+  "contact.info",
 ] as const;
