@@ -50,7 +50,11 @@ export async function x3dhInitiate(
   await ready();
   const { identityKey, signedPrekey, oneTimePrekey } = theirPreKeyBundle;
 
-  const valid = await verifySignedPrekey(signedPrekey.publicKey, signedPrekey.signature, identityKey);
+  const valid = await verifySignedPrekey(
+    signedPrekey.publicKey,
+    signedPrekey.signature,
+    identityKey,
+  );
   if (!valid) throw new Error("prekey bundle signature verification failed");
 
   const theirIdentityX = await identityKeyToX25519(identityKey);

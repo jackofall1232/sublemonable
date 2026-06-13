@@ -62,13 +62,27 @@ export function parseEnvelope(value: unknown): MessageEnvelope {
   if (!isUuid(v.id)) throw new EnvelopeError("id");
   if (!isUuid(v.sender_id)) throw new EnvelopeError("sender_id");
   if (!isUuid(v.recipient_id)) throw new EnvelopeError("recipient_id");
-  if (typeof v.ciphertext !== "string" || v.ciphertext.length === 0 || !BASE64_RE.test(v.ciphertext))
+  if (
+    typeof v.ciphertext !== "string" ||
+    v.ciphertext.length === 0 ||
+    !BASE64_RE.test(v.ciphertext)
+  )
     throw new EnvelopeError("ciphertext");
-  if (v.ephemeral_key !== null && (typeof v.ephemeral_key !== "string" || !BASE64_RE.test(v.ephemeral_key)))
+  if (
+    v.ephemeral_key !== null &&
+    (typeof v.ephemeral_key !== "string" || !BASE64_RE.test(v.ephemeral_key))
+  )
     throw new EnvelopeError("ephemeral_key");
-  if (v.prekey_id !== null && (typeof v.prekey_id !== "number" || !Number.isInteger(v.prekey_id) || v.prekey_id < 0))
+  if (
+    v.prekey_id !== null &&
+    (typeof v.prekey_id !== "number" || !Number.isInteger(v.prekey_id) || v.prekey_id < 0)
+  )
     throw new EnvelopeError("prekey_id");
-  if (typeof v.message_number !== "number" || !Number.isInteger(v.message_number) || v.message_number < 0)
+  if (
+    typeof v.message_number !== "number" ||
+    !Number.isInteger(v.message_number) ||
+    v.message_number < 0
+  )
     throw new EnvelopeError("message_number");
   if (
     typeof v.previous_chain_length !== "number" ||

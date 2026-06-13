@@ -59,7 +59,10 @@ export async function generateRelayKeyPair(): Promise<RelayKeyPair> {
  * innermost-first. Returns the outermost packet the client sends to hop[0].
  * Requires at least one hop.
  */
-export async function buildOnion(hops: readonly OnionHop[], finalPayload: Uint8Array): Promise<Uint8Array> {
+export async function buildOnion(
+  hops: readonly OnionHop[],
+  finalPayload: Uint8Array,
+): Promise<Uint8Array> {
   await ready();
   if (hops.length === 0) throw new Error("onion requires at least one hop");
 

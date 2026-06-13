@@ -24,17 +24,27 @@ export function BurnTimer({ ttlSeconds, startedAt, size = 16, onExpired }: BurnT
   const [remaining, setRemaining] = useState(() => remainingSegments(ttlSeconds, startedAt));
 
   useEffect(() => {
-    const id = setInterval(() => {
-      const next = remainingSegments(ttlSeconds, startedAt);
-      setRemaining((prev) => {
-        if (prev > 0 && next === 0) onExpired?.();
-        return next;
-      });
-    }, Math.max(250, (ttlSeconds * 1000) / SEGMENT_COUNT / 4));
+    const id = setInterval(
+      () => {
+        const next = remainingSegments(ttlSeconds, startedAt);
+        setRemaining((prev) => {
+          if (prev > 0 && next === 0) onExpired?.();
+          return next;
+        });
+      },
+      Math.max(250, (ttlSeconds * 1000) / SEGMENT_COUNT / 4),
+    );
     return () => clearInterval(id);
   }, [ttlSeconds, startedAt, onExpired]);
 
-  return <LemonSlice variant="burn_timer" segments={remaining} size={size} label={`Burns in ${ttlSeconds}s`} />;
+  return (
+    <LemonSlice
+      variant="burn_timer"
+      segments={remaining}
+      size={size}
+      label={`Burns in ${ttlSeconds}s`}
+    />
+  );
 }
 
 function remainingSegments(ttlSeconds: number, startedAt: number): number {

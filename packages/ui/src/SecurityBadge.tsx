@@ -47,7 +47,9 @@ export function SecurityBadge({ state, onClick, size = 18 }: SecurityBadgeProps)
         fillColor={fill}
         label={label}
       />
-      <span style={{ color: fill, fontFamily: typography.body.family, fontSize: "0.75rem" }}>{label}</span>
+      <span style={{ color: fill, fontFamily: typography.body.family, fontSize: "0.75rem" }}>
+        {label}
+      </span>
     </button>
   );
 }

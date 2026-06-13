@@ -24,10 +24,18 @@ export interface LemonSliceProps {
   variant?: LemonSliceVariant;
   /** Number of illuminated segments, 0–8. Ignored by logo_mark and loading_spinner. */
   segments?: number;
+  /**
+   * Progressive fill, 0–100. When set, segments fill proportionally and the
+   * next-to-fill segment is previewed with a soft lemon glow — the "lemon wheel"
+   * loader behavior. Takes precedence over `segments` when provided.
+   */
+  progress?: number;
   size?: number;
   /** Overrides the variant's default fill (e.g. green for a verified badge) */
   fillColor?: string;
   emptyColor?: string;
+  /** Slowly pulse the whole slice (Ghost-mode connection indicator). */
+  pulse?: boolean;
   /** Accessible label; defaults per variant */
   label?: string;
   className?: string;
@@ -37,7 +45,13 @@ export const SEGMENT_COUNT = 8;
 const SPIN_INTERVAL_MS = 110;
 
 /** SVG path for one wedge of the slice (pie segment with a small gap and center pip hole). */
-function segmentPath(index: number, cx: number, cy: number, outerR: number, innerR: number): string {
+function segmentPath(
+  index: number,
+  cx: number,
+  cy: number,
+  outerR: number,
+  innerR: number,
+): string {
   const step = (2 * Math.PI) / SEGMENT_COUNT;
   const gap = 0.1; // radians between wedges — reads as the lemon's pith
   const start = index * step - Math.PI / 2 + gap / 2;
@@ -64,9 +78,11 @@ const DEFAULT_LABELS: Record<LemonSliceVariant, string> = {
 export function LemonSlice({
   variant = "logo_mark",
   segments = SEGMENT_COUNT,
+  progress,
   size = 48,
   fillColor,
   emptyColor = color.semantic.border,
+  pulse = false,
   label,
   className,
 }: LemonSliceProps) {
@@ -75,7 +91,10 @@ export function LemonSlice({
 
   useEffect(() => {
     if (!spinning) return;
-    const id = setInterval(() => setSpinIndex((i) => (i + 1) % (SEGMENT_COUNT + 1)), SPIN_INTERVAL_MS);
+    const id = setInterval(
+      () => setSpinIndex((i) => (i + 1) % (SEGMENT_COUNT + 1)),
+      SPIN_INTERVAL_MS,
+    );
     return () => clearInterval(id);
   }, [spinning]);
 
@@ -85,7 +104,15 @@ export function LemonSlice({
   const outerR = size * 0.38;
   const innerR = size * 0.08;
 
-  const filled = Math.max(0, Math.min(SEGMENT_COUNT, spinning ? spinIndex : segments));
+  // Progressive fill (the "lemon wheel" loader) takes precedence when provided.
+  const progressFilled =
+    progress === undefined
+      ? null
+      : Math.round((Math.max(0, Math.min(100, progress)) / 100) * SEGMENT_COUNT);
+  const filled = Math.max(
+    0,
+    Math.min(SEGMENT_COUNT, spinning ? spinIndex : (progressFilled ?? segments)),
+  );
 
   // Burn timers shift from lemon → orange when low → red on the final segment
   const segmentFill = (isLit: boolean): string => {
@@ -106,7 +133,10 @@ export function LemonSlice({
       role="img"
       aria-label={label ?? DEFAULT_LABELS[variant]}
       className={className}
-      style={{ display: "block" }}
+      style={{
+        display: "block",
+        animation: pulse ? "sub-glow-pulse 2.4s ease-in-out infinite" : undefined,
+      }}
     >
       {/* Rind ring */}
       <circle
@@ -118,16 +148,24 @@ export function LemonSlice({
         strokeWidth={Math.max(1, size * 0.035)}
         opacity={0.9}
       />
-      {Array.from({ length: SEGMENT_COUNT }, (_, i) => (
-        <path
-          key={i}
-          d={segmentPath(i, cx, cy, outerR, innerR)}
-          fill={segmentFill(i < filled)}
-          style={{
-            transition: spinning ? "fill 80ms linear" : "fill 200ms cubic-bezier(0.16, 1, 0.3, 1)",
-          }}
-        />
-      ))}
+      {Array.from({ length: SEGMENT_COUNT }, (_, i) => {
+        const isLit = i < filled;
+        // The next-to-fill segment is previewed with a soft lemon glow.
+        const isNext = progressFilled !== null && i === filled && filled < SEGMENT_COUNT;
+        return (
+          <path
+            key={i}
+            d={segmentPath(i, cx, cy, outerR, innerR)}
+            fill={isNext ? color.core.lemonPale : segmentFill(isLit)}
+            style={{
+              transition: spinning
+                ? "fill 80ms linear"
+                : "fill 200ms cubic-bezier(0.16, 1, 0.3, 1)",
+              filter: isLit && !fillColor ? "drop-shadow(0 0 2px rgba(245,230,66,0.4))" : undefined,
+            }}
+          />
+        );
+      })}
       {/* Center pip */}
       <circle cx={cx} cy={cy} r={size * 0.045} fill={color.core.lemonZest} />
     </svg>

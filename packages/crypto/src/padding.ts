@@ -41,8 +41,7 @@ export async function pad(plaintext: Uint8Array, block: number = BLOCK_BYTES): P
 /** Recover the original plaintext from a padded block. */
 export function unpad(padded: Uint8Array): Uint8Array {
   if (padded.length < LEN_PREFIX_BYTES) throw new Error("padded input too short");
-  const len =
-    (padded[0]! << 24) | (padded[1]! << 16) | (padded[2]! << 8) | padded[3]!;
+  const len = (padded[0]! << 24) | (padded[1]! << 16) | (padded[2]! << 8) | padded[3]!;
   const length = len >>> 0;
   if (length > padded.length - LEN_PREFIX_BYTES) throw new Error("corrupt padding length");
   return padded.slice(LEN_PREFIX_BYTES, LEN_PREFIX_BYTES + length);

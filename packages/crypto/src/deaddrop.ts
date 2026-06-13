@@ -89,7 +89,7 @@ export function hasLeadingZeroBits(digest: Uint8Array, bits: number): boolean {
       if (byte !== 0) return false;
       remaining -= 8;
     } else {
-      return (byte >>> (8 - remaining)) === 0;
+      return byte >>> (8 - remaining) === 0;
     }
   }
   return remaining <= 0;

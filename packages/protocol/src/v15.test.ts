@@ -4,11 +4,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from "vitest";
-import {
-  CONNECTION_MODES,
-  connectionModeConfig,
-  DECOY_CADENCE_SECONDS,
-} from "./connection.js";
+import { CONNECTION_MODES, connectionModeConfig, DECOY_CADENCE_SECONDS } from "./connection.js";
 import {
   DEFAULT_PRIVACY_VIEW,
   platformWarning,

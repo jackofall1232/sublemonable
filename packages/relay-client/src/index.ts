@@ -13,10 +13,4 @@ export {
   type DecoySchedulerOptions,
   type Timer,
 } from "./decoy.js";
-export {
-  selectPath,
-  buildCircuit,
-  shouldRotate,
-  guardOf,
-  type Circuit,
-} from "./circuit.js";
+export { selectPath, buildCircuit, shouldRotate, guardOf, type Circuit } from "./circuit.js";
