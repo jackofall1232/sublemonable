@@ -75,7 +75,7 @@
           "certificate_pinning": {
             "ios": "NSURLSession with pinned certificate SHA-256 hash",
             "android": "OkHttp CertificatePinner",
-            "web": "Service Worker intercept with HPKP-style validation"
+            "web": "TLS 1.3 + HSTS (max-age=63072000; preload). True certificate pinning is not available in browser environments — HPKP was removed from all major browsers and Service Workers cannot access the TLS certificate chain. Web transport relies on CA chain validation + HSTS preload. Users requiring hard pinning should use the native iOS or Android clients."
           },
           "tor": {
             "enabled_by_default": false,
@@ -393,6 +393,90 @@
           "method": "Safety Number comparison (SHA-512 fingerprint of both identity keys)",
           "qr_code_verification": true,
           "in_person_verification": "Recommended for high-security contacts"
+        },
+        "platform_warning_system": {
+          "description": "Informs users when their contact is on a platform with reduced screenshot protection. UI layer only — no changes to crypto or server message architecture.",
+          "purpose": "Browser clients cannot block screenshots at the OS level. Contacts on native apps deserve to know this so they can make informed decisions about what to share.",
+          "platform_tracking": {
+            "where": "Session metadata — not message content. E2EE is not affected.",
+            "values": ["ios", "android", "browser"],
+            "server_stores": "Platform string per active session — treated as non-sensitive session metadata",
+            "passed_to_contact": "Via encrypted contact/conversation info signal — not embedded in message envelopes",
+            "real_time_updates": "If contact switches platforms mid-conversation (e.g. opens web client while mobile is active), warning updates in real time via WebSocket event"
+          },
+          "warning_display": {
+            "location": "Persistent badge in conversation header, below contact name",
+            "copy_browser_contact": "🌐 Messaging via browser — screenshot protection unavailable",
+            "copy_own_browser": "🌐 You're on browser — your messages can be screenshotted",
+            "dismissible": true,
+            "dismiss_scope": "Per-conversation — dismissing on one conversation does not affect others",
+            "re_shown": "Re-shown if contact switches to browser after being dismissed",
+            "color": "Lemon yellow warning tone — not red, not alarming, informative"
+          },
+          "who_sees_warning": {
+            "native_app_user": "Sees warning when their contact is on browser",
+            "browser_user": "Sees warning about their own limitations — honest and upfront",
+            "both_on_browser": "Single shared warning shown to both parties"
+          },
+          "non_intrusive_design": {
+            "no_modal": "Never blocks the UI with a modal or forced acknowledgement",
+            "no_alarm": "Warning tone is informative not alarming — matches lemon yellow brand",
+            "one_time_per_session": "After dismissal, only re-appears if platform changes"
+          }
+        },
+        "privacy_view_mode": {
+          "description": "Physical shoulder-surfing defense. Message content blurred by default, revealed only while actively interacting. Captures the blurred state on browser screenshot attempts.",
+          "purpose": "Protects against someone physically looking at your screen in public — on a train, in a cafe, over your shoulder.",
+          "scope": {
+            "global_toggle": "Settings → Privacy → Privacy View — applies to all conversations",
+            "per_conversation": "Long press conversation → Enable Privacy View — applies to that conversation only",
+            "conversation_list": "When privacy view active, conversation list previews also blurred — no message content visible on main screen"
+          },
+          "reveal_modes": {
+            "description": "User selects preferred reveal interaction in Settings → Privacy → Privacy View → Reveal Mode",
+            "hold_to_reveal": {
+              "name": "Hold to reveal",
+              "description": "Content blurred by default. Hold finger/mouse on message area to reveal. Release to re-blur. Most secure.",
+              "best_for": "High-risk environments, public transport, shared spaces"
+            },
+            "tap_timed": {
+              "name": "Tap to reveal (timed)",
+              "description": "Tap to reveal for configurable duration (5s / 10s / 30s), then auto-re-blurs",
+              "duration_options_seconds": [5, 10, 30],
+              "default_seconds": 10,
+              "best_for": "Balance of convenience and protection"
+            },
+            "tap_toggle": {
+              "name": "Tap to toggle",
+              "description": "Tap once to reveal, tap again to blur. Stays revealed until tapped again.",
+              "best_for": "Low-risk environments where user wants occasional protection"
+            }
+          },
+          "visual_design": {
+            "blur_style": "Frosted lemon-citrus texture overlay — not a generic grey blur",
+            "texture": "Semi-transparent lemon-yellow frosted glass effect — CSS backdrop-filter: blur(20px) with lemon tint rgba(245,230,66,0.08)",
+            "intentional_look": "Looks like a deliberate design choice, not a broken UI — on-brand and intentional",
+            "bubble_shape_preserved": "Message bubble shapes and layout remain visible — only text content is obscured",
+            "reveal_animation": "Smooth 150ms blur-out on reveal, 200ms blur-in on re-blur — fast enough to feel responsive"
+          },
+          "screenshot_behavior": {
+            "android": "FLAG_SECURE still active — screenshot shows black screen regardless of privacy view state",
+            "ios": "Screenshot detection triggers blur overlay. If privacy view already active, screenshot captures blurred state — partial mitigation.",
+            "browser": "Screenshots capture whatever is currently on screen. If privacy view active and content blurred, screenshot captures blurred state. This is the best mitigation available on browser."
+          },
+          "notification_behavior": {
+            "when_privacy_view_active": "Push notifications show sender name only — no message preview regardless of OS notification settings",
+            "lock_screen": "No message content on lock screen when privacy view enabled for that conversation"
+          },
+          "platform_implementation": {
+            "web": "CSS backdrop-filter on message container. Hold event via mousedown/touchstart + mouseup/touchend. Privacy view state stored in encrypted local settings.",
+            "ios": "SwiftUI blur modifier with custom lemon tint. Long press gesture recognizer for hold-to-reveal. UINotificationFeedbackGenerator on reveal for tactile confirmation.",
+            "android": "Jetpack Compose BlurMaskFilter with lemon tint overlay. pointerInput for hold detection. HapticFeedbackType.LongPress on reveal."
+          },
+          "indicator": {
+            "active_indicator": "Small frosted lemon slice icon in conversation header when privacy view active for that conversation",
+            "global_indicator": "Lemon slice icon in app status bar area when global privacy view enabled"
+          }
         }
       },
       "build_order": {
