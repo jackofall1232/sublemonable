@@ -87,6 +87,12 @@ export default function SecurityPage() {
             <strong>Android</strong> — Android Keystore System, hardware-backed where the device
             supports it.
           </li>
+          <li>
+            <strong>Linux</strong> — the Secret Service API (GNOME Keyring on GNOME, KWallet on
+            KDE). On minimal desktops with no Secret Service daemon, an Argon2id+AES-256-GCM
+            encrypted file fallback is used. Either way the vault is encrypted before it reaches the
+            storage layer.
+          </li>
         </ul>
 
         <h2 id="server">What the server stores (and doesn&apos;t)</h2>
@@ -141,6 +147,16 @@ export default function SecurityPage() {
             list is blurred and desaturated within 120 milliseconds. On top of that, every
             conversation carries an invisible watermark encoding the recipient and timestamp — if a
             screenshot leaks, it identifies who leaked it.
+          </li>
+          <li>
+            <strong>Linux (Wayland)</strong> — an OS-level hard block via xdg-desktop-portal on
+            compositors that support it (GNOME Shell, KDE Plasma). This is the desktop equivalent of
+            Android&apos;s FLAG_SECURE.
+          </li>
+          <li>
+            <strong>Linux (X11)</strong> — best-effort only. X11 cannot prevent screen capture, so
+            we&apos;re honest about it: the focus-loss blur overlay is the protection you get.
+            Prefer Wayland for confidential use.
           </li>
         </ul>
         <p>

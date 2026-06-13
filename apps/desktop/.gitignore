@@ -1,0 +1,10 @@
+# Tauri build output
+src-tauri/target/
+
+# Icons generated from SVG — not committed, generated in CI
+src-tauri/icons/*.png
+src-tauri/icons/*.icns
+src-tauri/icons/*.ico
+
+# Tauri WIP
+gen/

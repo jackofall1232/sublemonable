@@ -88,3 +88,4 @@ export {
   type PeeledLayer,
 } from "./onion.js";
 export { sealTo, openSealed } from "./sealedbox.js";
+export { isTauri } from "./platform.js";

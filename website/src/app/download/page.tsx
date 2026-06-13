@@ -37,8 +37,8 @@ export default function DownloadPage() {
           Get the app
         </h1>
         <p className="mt-6 text-lg leading-relaxed text-ink-secondary">
-          Three ways to run Sublemonable. Four, if you count running the entire thing yourself —
-          which we encourage.
+          Several ways to run Sublemonable — mobile, desktop, or the browser. And, if you count
+          running the entire thing yourself, one more — which we encourage.
         </p>
 
         {/* App stores */}
@@ -69,6 +69,50 @@ export default function DownloadPage() {
             on desktop, or <span className="text-ink-primary">Share → Add to Home Screen</span> on
             mobile). Installed, it works offline for composing: outbound messages queue locally and
             send when you reconnect. Only the UI is cached — never your messages.
+          </p>
+        </section>
+
+        {/* Linux desktop */}
+        <section className="mt-16">
+          <h2 className="font-display text-2xl font-semibold tracking-display text-ink-primary">
+            Linux — .deb, .AppImage, .rpm
+          </h2>
+          <p className="mt-3 leading-relaxed text-ink-secondary">
+            A native desktop app built with Tauri — no bundled Chromium, just a small Rust backend.
+            The <span className="text-ink-primary">.deb</span> is the primary package for Debian,
+            Ubuntu, Kali Linux, Parrot OS, and Pop!_OS. The{" "}
+            <span className="text-ink-primary">.AppImage</span> is universal — it runs on any distro
+            without installing. An <span className="text-ink-primary">.rpm</span> is also produced
+            for Fedora and RHEL (community-supported).
+          </p>
+          <div className="mt-6 flex flex-wrap gap-4">
+            <a
+              href={`${GITHUB_URL}/releases/latest`}
+              className="w-52 rounded-md border border-line bg-bg-elevated px-5 py-3 text-left transition duration-base ease-brand hover:border-lemon hover:text-lemon"
+            >
+              <div className="font-mono text-[10px] uppercase tracking-wide text-ink-muted">
+                Debian · Ubuntu · Kali
+              </div>
+              <div className="font-display text-base font-semibold text-ink-primary">
+                Download .deb
+              </div>
+            </a>
+            <a
+              href={`${GITHUB_URL}/releases/latest`}
+              className="w-52 rounded-md border border-line bg-bg-elevated px-5 py-3 text-left transition duration-base ease-brand hover:border-lemon hover:text-lemon"
+            >
+              <div className="font-mono text-[10px] uppercase tracking-wide text-ink-muted">
+                Any Linux distro
+              </div>
+              <div className="font-display text-base font-semibold text-ink-primary">
+                Download .AppImage
+              </div>
+            </a>
+          </div>
+          <p className="mt-5 leading-relaxed text-ink-secondary">
+            On <span className="text-ink-primary">Wayland</span> (GNOME, KDE Plasma) the desktop app
+            applies an OS-level screenshot hard block — the same protection as Android FLAG_SECURE.
+            On X11 that protection is best-effort, so prefer a Wayland session for confidential use.
           </p>
         </section>
 

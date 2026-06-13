@@ -2,18 +2,20 @@
   "meta": {
     "file": "sublemonable-MASTER.json",
     "description": "Single source of truth for Sublemonable v1.0 and v1.5 specifications. v2.0 spec lives in Claude/sublemonable-v2-blueprint.json. Design preview in Claude/sublemonable-preview.html.",
-    "roadmap": ["1.0.0", "1.5.0", "2.0.0"],
+    "roadmap": [
+      "1.0.0",
+      "1.5.0",
+      "2.0.0"
+    ],
     "v2_blueprint": "Claude/sublemonable-v2-blueprint.json",
     "design_preview": "Claude/sublemonable-preview.html"
   },
-
   "versions": {
-
     "1.0.0": {
       "project": {
         "name": "Sublemonable",
         "version": "1.0.0",
-        "description": "Zero-knowledge, end-to-end encrypted ephemeral messaging app for browser, iOS, and Android",
+        "description": "Zero-knowledge, end-to-end encrypted ephemeral messaging app for browser, iOS, Android, and Linux desktop",
         "license": "AGPL-3.0",
         "repo_structure": {
           "monorepo": true,
@@ -22,6 +24,7 @@
             "apps/web",
             "apps/ios",
             "apps/android",
+            "apps/desktop",
             "packages/crypto",
             "packages/protocol",
             "packages/ui",
@@ -54,7 +57,8 @@
           "libraries": {
             "web": "libsodium.js (v0.7.x)",
             "ios": "libsignal-client (Apple Swift Package)",
-            "android": "libsignal-client (Maven)"
+            "android": "libsignal-client (Maven)",
+            "linux": "Tauri v2 + secret-service Rust crate (libsecret / GNOME Keyring / KWallet)"
           },
           "key_types": {
             "identity_key": "Curve25519 long-term keypair, generated on device, never leaves device",
@@ -66,7 +70,8 @@
           "key_storage": {
             "web": "IndexedDB encrypted with AES-256-GCM, master key derived from passphrase via Argon2id",
             "ios": "iOS Secure Enclave + Keychain, biometric-protected",
-            "android": "Android Keystore System, hardware-backed where available"
+            "android": "Android Keystore System, hardware-backed where available",
+            "linux": "Secret Service API (GNOME Keyring / KWallet) via secret-service Rust crate. File fallback ($XDG_DATA_HOME/sublemonable/vault.bin) if no daemon available. Vault blob is Argon2id+AES-256-GCM encrypted by packages/crypto before reaching Rust storage layer."
           },
           "password_hashing": "Argon2id — memory: 65536 KB, iterations: 3, parallelism: 4"
         },
@@ -345,7 +350,14 @@
           },
           "disappearing_messages": {
             "enabled": true,
-            "options_seconds": [30, 60, 300, 3600, 86400, 604800],
+            "options_seconds": [
+              30,
+              60,
+              300,
+              3600,
+              86400,
+              604800
+            ],
             "timer_starts": "on_delivery",
             "enforced_both_sides": true
           },
@@ -399,7 +411,11 @@
           "purpose": "Browser clients cannot block screenshots at the OS level. Contacts on native apps deserve to know this so they can make informed decisions about what to share.",
           "platform_tracking": {
             "where": "Session metadata — not message content. E2EE is not affected.",
-            "values": ["ios", "android", "browser"],
+            "values": [
+              "ios",
+              "android",
+              "browser"
+            ],
             "server_stores": "Platform string per active session — treated as non-sensitive session metadata",
             "passed_to_contact": "Via encrypted contact/conversation info signal — not embedded in message envelopes",
             "real_time_updates": "If contact switches platforms mid-conversation (e.g. opens web client while mobile is active), warning updates in real time via WebSocket event"
@@ -442,7 +458,11 @@
             "tap_timed": {
               "name": "Tap to reveal (timed)",
               "description": "Tap to reveal for configurable duration (5s / 10s / 30s), then auto-re-blurs",
-              "duration_options_seconds": [5, 10, 30],
+              "duration_options_seconds": [
+                5,
+                10,
+                30
+              ],
               "default_seconds": 10,
               "best_for": "Balance of convenience and protection"
             },
@@ -512,6 +532,21 @@
             "Push notifications (content-free)"
           ]
         },
+        "phase_3_5": {
+          "name": "Linux Desktop App",
+          "deliverables": [
+            "apps/desktop — Tauri v2 app scaffold",
+            "apps/desktop/src-tauri/src/keystore.rs — libsecret + file fallback vault storage",
+            "apps/desktop/src-tauri/src/screenshot.rs — xdg-desktop-portal Wayland inhibit + X11 best-effort",
+            "apps/desktop/src-tauri/src/tor.rs — SOCKS5 proxy config and connectivity check",
+            "apps/desktop/src-tauri/tauri.conf.json — bundle targets: .deb (primary), .AppImage, .rpm",
+            "packages/crypto/src/platform.ts — isTauri() runtime detection",
+            "apps/web/src/lib/storage.ts — conditional Tauri invoke routing for vault ops",
+            "CI: desktop-linux job producing .deb, .AppImage, .rpm artifacts",
+            "docs/SETUP.md — Linux desktop prerequisites and build instructions",
+            "apps/desktop/README.md — installation, Tor routing, key storage docs"
+          ]
+        },
         "phase_4": {
           "name": "Metadata Privacy + Advanced Security",
           "deliverables": [
@@ -526,12 +561,16 @@
       "devops": {
         "ci_cd": "GitHub Actions",
         "testing": {
-          "unit": "Go test (server), Vitest (web), XCTest (iOS), JUnit (Android)",
+          "unit": "Go test (server), Vitest (web), XCTest (iOS), JUnit (Android), cargo test (desktop Rust)",
           "e2e": "Playwright (web), Detox (React Native if used)",
           "security_scanning": "Semgrep + Trivy in CI pipeline"
         },
         "docker": {
-          "services": ["server", "postgres", "tor (optional)"],
+          "services": [
+            "server",
+            "postgres",
+            "tor (optional)"
+          ],
           "compose_file": "docker-compose.yml + docker-compose.tor.yml"
         },
         "environment_variables": [
@@ -562,6 +601,7 @@
           "9. Build apps/web — React + Vite, integrate packages/crypto + packages/ui, full chat UI with screenshot protection and invisible watermark",
           "10. Build apps/android — Kotlin + Compose, FLAG_SECURE, libsignal-client, OkHttp pinning",
           "11. Build apps/ios — SwiftUI, libsignal-client, Keychain, capture detection overlay",
+          "11b. Build apps/desktop — Tauri v2 scaffold, Rust keystore/screenshot/tor modules, tauri.conf.json with .deb+.AppImage+.rpm bundle targets, platform detection in packages/crypto, conditional storage routing in apps/web",
           "12. Build website — Next.js 14 + Tailwind + Framer Motion marketing site for sublemonable.com per marketing_site spec",
           "13. Write docker-compose.yml + docker-compose.tor.yml",
           "14. Write .github/workflows/ci.yml GitHub Actions CI pipeline",
@@ -597,8 +637,13 @@
           "platform": "GitHub",
           "recommended_name": "sublemonable/sublemonable",
           "topics": [
-            "encryption", "privacy", "messaging", "signal-protocol",
-            "e2ee", "zero-knowledge", "open-source"
+            "encryption",
+            "privacy",
+            "messaging",
+            "signal-protocol",
+            "e2ee",
+            "zero-knowledge",
+            "open-source"
           ]
         },
         "root_files_to_generate": {
@@ -622,30 +667,90 @@
             "badges": [
               "License: AGPL-3.0",
               "Build: GitHub Actions",
-              "Platforms: iOS | Android | Browser",
+              "Platforms: iOS | Android | Linux | Browser",
               "Encryption: Signal Protocol"
             ]
           },
           "SECURITY.md": {
             "purpose": "Responsible disclosure policy for security researchers",
             "sections": [
-              { "title": "Reporting a vulnerability", "content": "Do NOT open a public issue. Use GitHub private security advisories." },
-              { "title": "What to include", "content": "Vulnerability description, reproduction steps, potential impact, suggested fix if any" },
-              { "title": "Response timeline", "content": "Acknowledgement within 48 hours. Fix target within 90 days of confirmed vulnerability." },
-              { "title": "Scope in scope", "content": "server, web app, iOS app, Android app, packages/crypto, packages/protocol" },
-              { "title": "Scope out of scope", "content": "Third-party dependencies, social engineering" },
-              { "title": "Recognition", "content": "Valid disclosures credited in AUDIT.md and release notes unless researcher prefers anonymity" },
-              { "title": "Safe harbor", "content": "Good-faith research under this policy is authorized. We will not pursue legal action against researchers who follow it." }
+              {
+                "title": "Reporting a vulnerability",
+                "content": "Do NOT open a public issue. Use GitHub private security advisories."
+              },
+              {
+                "title": "What to include",
+                "content": "Vulnerability description, reproduction steps, potential impact, suggested fix if any"
+              },
+              {
+                "title": "Response timeline",
+                "content": "Acknowledgement within 48 hours. Fix target within 90 days of confirmed vulnerability."
+              },
+              {
+                "title": "Scope in scope",
+                "content": "server, web app, iOS app, Android app, packages/crypto, packages/protocol"
+              },
+              {
+                "title": "Scope out of scope",
+                "content": "Third-party dependencies, social engineering"
+              },
+              {
+                "title": "Recognition",
+                "content": "Valid disclosures credited in AUDIT.md and release notes unless researcher prefers anonymity"
+              },
+              {
+                "title": "Safe harbor",
+                "content": "Good-faith research under this policy is authorized. We will not pursue legal action against researchers who follow it."
+              }
             ]
           },
           "CONTRIBUTING.md": {
             "purpose": "Contribution guidelines",
             "sections": [
-              { "title": "Before contributing", "content": "Read docs/SECURITY_MODEL.md. All contributions must maintain zero-knowledge architecture." },
-              { "title": "Welcome contributions", "items": ["Bug fixes", "Security improvements", "Performance improvements", "Documentation", "Translations", "New platform support"] },
-              { "title": "Hard rules never do this", "items": ["Add server-side message logging of any kind", "Weaken encryption defaults", "Add analytics, telemetry, or crash reporting", "Store user-identifiable metadata", "Change cryptography without a detailed explanation reviewed by a maintainer"] },
-              { "title": "PR process", "items": ["Fork and create feature branch", "Write or update tests", "Run full test suite locally", "Open PR with clear description of what and why", "Security-sensitive PRs take longer"] },
-              { "title": "Code style", "items": ["Go: gofmt + golangci-lint", "TypeScript: ESLint + Prettier", "Swift: SwiftLint", "Kotlin: ktlint"] }
+              {
+                "title": "Before contributing",
+                "content": "Read docs/SECURITY_MODEL.md. All contributions must maintain zero-knowledge architecture."
+              },
+              {
+                "title": "Welcome contributions",
+                "items": [
+                  "Bug fixes",
+                  "Security improvements",
+                  "Performance improvements",
+                  "Documentation",
+                  "Translations",
+                  "New platform support"
+                ]
+              },
+              {
+                "title": "Hard rules never do this",
+                "items": [
+                  "Add server-side message logging of any kind",
+                  "Weaken encryption defaults",
+                  "Add analytics, telemetry, or crash reporting",
+                  "Store user-identifiable metadata",
+                  "Change cryptography without a detailed explanation reviewed by a maintainer"
+                ]
+              },
+              {
+                "title": "PR process",
+                "items": [
+                  "Fork and create feature branch",
+                  "Write or update tests",
+                  "Run full test suite locally",
+                  "Open PR with clear description of what and why",
+                  "Security-sensitive PRs take longer"
+                ]
+              },
+              {
+                "title": "Code style",
+                "items": [
+                  "Go: gofmt + golangci-lint",
+                  "TypeScript: ESLint + Prettier",
+                  "Swift: SwiftLint",
+                  "Kotlin: ktlint"
+                ]
+              }
             ]
           },
           "AUDIT.md": {
@@ -657,13 +762,29 @@
             "initial_content": "## [Unreleased]\n### Added\n- Initial release"
           },
           ".github/ISSUE_TEMPLATE/bug_report.md": {
-            "fields": ["Description", "Steps to reproduce", "Expected behavior", "Platform iOS Android Browser", "App version"]
+            "fields": [
+              "Description",
+              "Steps to reproduce",
+              "Expected behavior",
+              "Platform iOS Android Browser",
+              "App version"
+            ]
           },
           ".github/ISSUE_TEMPLATE/feature_request.md": {
-            "fields": ["Feature description", "Use case", "Security implications considered"]
+            "fields": [
+              "Feature description",
+              "Use case",
+              "Security implications considered"
+            ]
           },
           ".github/PULL_REQUEST_TEMPLATE.md": {
-            "checklist": ["No logging added", "No encryption weakened", "No tracking added", "Tests added or updated", "SECURITY_MODEL.md updated if architecture changed"]
+            "checklist": [
+              "No logging added",
+              "No encryption weakened",
+              "No tracking added",
+              "Tests added or updated",
+              "SECURITY_MODEL.md updated if architecture changed"
+            ]
           },
           "docs/SECURITY_MODEL.md": {
             "purpose": "Full technical security model for users and auditors",
@@ -681,10 +802,27 @@
             ]
           },
           "docs/SETUP.md": {
-            "sections": ["Prerequisites", "Clone and install", "Environment variables", "Run server", "Run web app", "Run iOS simulator", "Run Android emulator", "Run tests"]
+            "sections": [
+              "Prerequisites",
+              "Clone and install",
+              "Environment variables",
+              "Run server",
+              "Run web app",
+              "Run iOS simulator",
+              "Run Android emulator",
+              "Run tests"
+            ]
           },
           "docs/SELF_HOSTING.md": {
-            "sections": ["Requirements", "Docker Compose quickstart", "Environment variables reference", "TLS setup", "Optional Tor hidden service", "Updating", "Backup and recovery"]
+            "sections": [
+              "Requirements",
+              "Docker Compose quickstart",
+              "Environment variables reference",
+              "TLS setup",
+              "Optional Tor hidden service",
+              "Updating",
+              "Backup and recovery"
+            ]
           }
         }
       },
@@ -736,37 +874,72 @@
               "family": "Clash Display",
               "fallback": "'Space Grotesk', sans-serif",
               "source": "Google Fonts / Fontshare",
-              "weights": [500, 600, 700],
+              "weights": [
+                500,
+                600,
+                700
+              ],
               "usage": "App name, hero headlines, section titles",
               "letter_spacing": "-0.03em"
             },
             "body": {
               "family": "Inter",
               "fallback": "system-ui, sans-serif",
-              "weights": [400, 500],
+              "weights": [
+                400,
+                500
+              ],
               "usage": "Messages, UI labels, body copy"
             },
             "mono": {
               "family": "JetBrains Mono",
               "fallback": "'Fira Code', monospace",
-              "weights": [400],
+              "weights": [
+                400
+              ],
               "usage": "Key fingerprints, security codes, timestamps"
             },
             "scale": {
-              "xs": "0.75rem", "sm": "0.875rem", "base": "1rem",
-              "lg": "1.125rem", "xl": "1.25rem", "2xl": "1.5rem",
-              "3xl": "1.875rem", "4xl": "2.25rem", "5xl": "3rem", "hero": "5rem"
+              "xs": "0.75rem",
+              "sm": "0.875rem",
+              "base": "1rem",
+              "lg": "1.125rem",
+              "xl": "1.25rem",
+              "2xl": "1.5rem",
+              "3xl": "1.875rem",
+              "4xl": "2.25rem",
+              "5xl": "3rem",
+              "hero": "5rem"
             }
           },
           "spacing": {
             "base_unit": "4px",
-            "scale": [0, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64, 80, 96, 128]
+            "scale": [
+              0,
+              4,
+              8,
+              12,
+              16,
+              20,
+              24,
+              32,
+              40,
+              48,
+              64,
+              80,
+              96,
+              128
+            ]
           },
           "radius": {
-            "sm": "6px", "md": "12px", "lg": "18px", "xl": "24px",
+            "sm": "6px",
+            "md": "12px",
+            "lg": "18px",
+            "xl": "24px",
             "bubble_sent": "18px 18px 4px 18px",
             "bubble_received": "18px 18px 18px 4px",
-            "pill": "9999px", "circle": "50%"
+            "pill": "9999px",
+            "circle": "50%"
           },
           "shadows": {
             "lemon_glow_sm": "0 0 12px rgba(245, 230, 66, 0.3)",
@@ -882,14 +1055,28 @@
             }
           },
           "security_badge": {
-            "verified": { "color": "#4ADE80", "icon": "lemon slice with checkmark", "label": "Keys verified" },
-            "unverified": { "color": "#A8A070", "icon": "lemon slice outline", "label": "Tap to verify" },
-            "warning": { "color": "#FF8C00", "label": "Key changed — verify identity" }
+            "verified": {
+              "color": "#4ADE80",
+              "icon": "lemon slice with checkmark",
+              "label": "Keys verified"
+            },
+            "unverified": {
+              "color": "#A8A070",
+              "icon": "lemon slice outline",
+              "label": "Tap to verify"
+            },
+            "warning": {
+              "color": "#FF8C00",
+              "label": "Key changed — verify identity"
+            }
           },
           "passphrase_screen": {
             "background": "#0D0C00",
             "center_element": "Large lemon slice logo, segments illuminate as passphrase strength increases",
-            "input": { "style": "minimal underline-only input, lemon-yellow on focus", "font": "Inter, large, centered" },
+            "input": {
+              "style": "minimal underline-only input, lemon-yellow on focus",
+              "font": "Inter, large, centered"
+            },
             "strength_indicator": "Lemon slice fills segment by segment"
           },
           "key_fingerprint": {
@@ -916,10 +1103,26 @@
           "onboarding": {
             "style": "Full-screen card stack, swipe through",
             "slides": [
-              { "visual": "Animated lemon slice — segments = encryption layers", "headline": "End-to-end encrypted", "body": "Your messages are locked before they leave your device. We can't read them. Nobody can." },
-              { "visual": "Message bubble with burn animation", "headline": "Messages that disappear", "body": "Set any message to self-destruct. Once read, once seen, then gone." },
-              { "visual": "Pixelated/blurred screenshot mockup", "headline": "Screenshots? Blocked.", "body": "On Android, screenshots are impossible. On iOS and browser, we blur instantly." },
-              { "visual": "QR code with lemon-slice overlay", "headline": "No phone number needed", "body": "Add contacts by QR code or link. We don't need your number, your email, or your name." }
+              {
+                "visual": "Animated lemon slice — segments = encryption layers",
+                "headline": "End-to-end encrypted",
+                "body": "Your messages are locked before they leave your device. We can't read them. Nobody can."
+              },
+              {
+                "visual": "Message bubble with burn animation",
+                "headline": "Messages that disappear",
+                "body": "Set any message to self-destruct. Once read, once seen, then gone."
+              },
+              {
+                "visual": "Pixelated/blurred screenshot mockup",
+                "headline": "Screenshots? Blocked.",
+                "body": "On Android, screenshots are impossible. On iOS and browser, we blur instantly."
+              },
+              {
+                "visual": "QR code with lemon-slice overlay",
+                "headline": "No phone number needed",
+                "body": "Add contacts by QR code or link. We don't need your number, your email, or your name."
+              }
             ]
           },
           "chat_list": {
@@ -992,45 +1195,94 @@
                 "headline": "Nothing lasts.",
                 "subheadline": "That's the point.",
                 "body": "Sublemonable is end-to-end encrypted messaging that disappears. No logs. No screenshots. No trace.",
-                "cta_primary": { "text": "Get the app", "color": "lemon" },
-                "cta_secondary": { "text": "How it works", "color": "ghost" }
+                "cta_primary": {
+                  "text": "Get the app",
+                  "color": "lemon"
+                },
+                "cta_secondary": {
+                  "text": "How it works",
+                  "color": "ghost"
+                }
               },
               {
                 "id": "features",
                 "type": "alternating_scroll",
                 "items": [
-                  { "headline": "Encrypted before it leaves your hands.", "body": "Signal Protocol. Every message gets its own key. We store nothing readable. Not because the law says so — because it's technically impossible.", "visual": "Animated key exchange diagram — two lemon slices passing encrypted segments between them" },
-                  { "headline": "Read it. Watch it go.", "body": "Burn-on-read. Timed destruction. 30 seconds to a week — your call. The server deletes the moment your recipient gets it.", "visual": "Message bubble burn animation loop" },
-                  { "headline": "Screenshots? We blur those.", "body": "Android blocks them entirely. iOS and browser blur your messages the instant a screenshot is attempted. We also watermark every conversation — if something leaks, we know who did it.", "visual": "Split mockup: left phone blurred, right shows 'Screenshot blocked'" },
-                  { "headline": "No number. No email. No name.", "body": "Connect by QR code. Your identity is a key pair we generate on your device. We don't know who you are.", "visual": "QR code scan animation with lemon-slice overlay" }
+                  {
+                    "headline": "Encrypted before it leaves your hands.",
+                    "body": "Signal Protocol. Every message gets its own key. We store nothing readable. Not because the law says so — because it's technically impossible.",
+                    "visual": "Animated key exchange diagram — two lemon slices passing encrypted segments between them"
+                  },
+                  {
+                    "headline": "Read it. Watch it go.",
+                    "body": "Burn-on-read. Timed destruction. 30 seconds to a week — your call. The server deletes the moment your recipient gets it.",
+                    "visual": "Message bubble burn animation loop"
+                  },
+                  {
+                    "headline": "Screenshots? We blur those.",
+                    "body": "Android blocks them entirely. iOS and browser blur your messages the instant a screenshot is attempted. We also watermark every conversation — if something leaks, we know who did it.",
+                    "visual": "Split mockup: left phone blurred, right shows 'Screenshot blocked'"
+                  },
+                  {
+                    "headline": "No number. No email. No name.",
+                    "body": "Connect by QR code. Your identity is a key pair we generate on your device. We don't know who you are.",
+                    "visual": "QR code scan animation with lemon-slice overlay"
+                  }
                 ]
               },
               {
                 "id": "how_it_works",
                 "type": "horizontal_scroll_steps",
                 "steps": [
-                  { "label": "Generate keys", "description": "Your device creates your identity. Keys never leave your device." },
-                  { "label": "Exchange codes", "description": "Share a QR or link. No personal info changes hands." },
-                  { "label": "Send encrypted", "description": "Every message encrypted locally before sending." },
-                  { "label": "Delivered and deleted", "description": "Server purges message the instant it's delivered." },
-                  { "label": "Gone forever", "description": "Set to burn, or burn on read. Nothing stays." }
+                  {
+                    "label": "Generate keys",
+                    "description": "Your device creates your identity. Keys never leave your device."
+                  },
+                  {
+                    "label": "Exchange codes",
+                    "description": "Share a QR or link. No personal info changes hands."
+                  },
+                  {
+                    "label": "Send encrypted",
+                    "description": "Every message encrypted locally before sending."
+                  },
+                  {
+                    "label": "Delivered and deleted",
+                    "description": "Server purges message the instant it's delivered."
+                  },
+                  {
+                    "label": "Gone forever",
+                    "description": "Set to burn, or burn on read. Nothing stays."
+                  }
                 ]
               },
               {
                 "id": "platform_badges",
                 "type": "centered_row",
-                "content": ["iOS", "Android", "Browser — no install needed"]
+                "content": [
+                  "iOS",
+                  "Android",
+                  "Browser — no install needed"
+                ]
               },
               {
                 "id": "open_source",
                 "type": "dark_callout",
                 "headline": "We show our work.",
                 "body": "Sublemonable is open source. The encryption, the server, the apps — all of it auditable. Trust shouldn't require faith.",
-                "cta": { "text": "View on GitHub", "icon": "github" }
+                "cta": {
+                  "text": "View on GitHub",
+                  "icon": "github"
+                }
               },
               {
                 "id": "footer",
-                "links": ["GitHub", "Security Model", "Privacy Policy", "Self-host"],
+                "links": [
+                  "GitHub",
+                  "Security Model",
+                  "Privacy Policy",
+                  "Self-host"
+                ],
                 "tagline": "Sublemonable. Nothing lasts.",
                 "logo": "lemon slice mark"
               }
@@ -1078,7 +1330,6 @@
         ]
       }
     },
-
     "1.5.0": {
       "project": {
         "name": "Sublemonable",
@@ -1298,9 +1549,21 @@
             "recipient": "Picks up from Relay C. Decrypts with Signal Protocol. Sealed Sender reveals true sender only to recipient."
           },
           "what_each_node_knows": {
-            "relay_a": ["Previous hop (Tor exit node — not real sender IP)", "Next hop (Relay B address)", "Encrypted blob — cannot read"],
-            "relay_b": ["Previous hop (Relay A)", "Next hop (Relay C)", "Encrypted blob — cannot read"],
-            "relay_c": ["Previous hop (Relay B)", "Recipient ID", "Encrypted envelope — cannot read content"]
+            "relay_a": [
+              "Previous hop (Tor exit node — not real sender IP)",
+              "Next hop (Relay B address)",
+              "Encrypted blob — cannot read"
+            ],
+            "relay_b": [
+              "Previous hop (Relay A)",
+              "Next hop (Relay C)",
+              "Encrypted blob — cannot read"
+            ],
+            "relay_c": [
+              "Previous hop (Relay B)",
+              "Recipient ID",
+              "Encrypted envelope — cannot read content"
+            ]
           },
           "compromise_resistance": "An adversary must compromise all 3 relay nodes AND correlate timing to link sender and recipient. With Tor + decoy traffic this is computationally and practically infeasible.",
           "relay_node_changes": {

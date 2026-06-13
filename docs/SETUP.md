@@ -9,6 +9,20 @@
 - **Android Studio** Hedgehog+ with SDK 34 (Android app only)
 - `openssl` for generating JWT signing keys
 
+### Linux desktop app (apps/desktop)
+
+The Tauri v2 desktop app additionally requires:
+
+- **Rust** stable (rustup recommended) and the Tauri CLI (`cargo install tauri-cli --version '^2'`)
+- `libwebkit2gtk-4.1-dev`, `libsecret-1-dev`, `libgtk-3-dev`, `librsvg2-dev`, and `patchelf` (for
+  the AppImage bundle)
+
+On Debian / Ubuntu / Kali:
+
+```bash
+sudo apt-get install -y libwebkit2gtk-4.1-dev libsecret-1-dev libgtk-3-dev librsvg2-dev patchelf
+```
+
 ## Clone and install
 
 ```bash
@@ -88,4 +102,19 @@ pnpm test                              # Vitest — packages + web
 cd server && go test ./...             # Go server tests
 cd apps/android && ./gradlew test      # JUnit
 # iOS: ⌘U in Xcode, or: xcodebuild test -scheme Sublemonable -destination 'platform=iOS Simulator,name=iPhone 15'
+```
+
+## Run the Linux desktop app
+
+```bash
+cd apps/desktop
+cargo tauri dev    # opens Tauri window backed by apps/web dev server
+
+# Or build release packages:
+cargo tauri build --bundles deb,appimage,rpm
+# Output: src-tauri/target/release/bundle/{deb,appimage,rpm}/
+
+# For Tor routing during dev:
+torsocks cargo tauri dev
+# Or: ALL_PROXY=socks5h://127.0.0.1:9050 cargo tauri dev
 ```

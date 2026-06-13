@@ -1,0 +1,54 @@
+# Sublemonable — Copyright (C) 2026 Sublemonable contributors
+# Licensed under the GNU Affero General Public License v3.0 or later.
+# See the LICENSE file in the repository root for full license text.
+# SPDX-License-Identifier: AGPL-3.0-only
+
+[package]
+name = "sublemonable-desktop"
+version = "1.0.0"
+edition = "2021"
+description = "Sublemonable desktop app — Linux"
+license = "AGPL-3.0-only"
+authors = ["Sublemonable contributors"]
+rust-version = "1.77.2"
+
+# The library carries all logic so it can be reused across desktop and (future)
+# mobile targets; main.rs is a thin entry point that calls run().
+[lib]
+name = "sublemonable_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+# tauri-build generates the Tauri context (config, capabilities, icons) at
+# compile time. It is part of the Tauri toolchain, not an extra runtime dep.
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+# libsecret (Secret Service) bindings for the primary keystore backend.
+secret-service = { version = "4", features = ["rt-tokio-crypto-rust"] }
+# xdg-desktop-portal client — screenshot inhibit on Wayland.
+# default-features = false drops the async-std backend (ashpd enables it by
+# default); we use the tokio backend to match the rest of the app.
+ashpd = { version = "0.9", default-features = false, features = ["tokio"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# XDG base dirs for the file-fallback keystore path.
+dirs = "5"
+# Zero secret bytes on drop.
+zeroize = { version = "1", features = ["derive"] }
+
+[profile.release]
+# Smaller, harder-to-reverse release binary; strip symbols.
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
