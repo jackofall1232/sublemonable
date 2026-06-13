@@ -149,14 +149,10 @@ export default function SecurityPage() {
             screenshot leaks, it identifies who leaked it.
           </li>
           <li>
-            <strong>Linux (Wayland)</strong> — an OS-level hard block via xdg-desktop-portal on
-            compositors that support it (GNOME Shell, KDE Plasma). This is the desktop equivalent of
-            Android&apos;s FLAG_SECURE.
-          </li>
-          <li>
-            <strong>Linux (X11)</strong> — best-effort only. X11 cannot prevent screen capture, so
-            we&apos;re honest about it: the focus-loss blur overlay is the protection you get.
-            Prefer Wayland for confidential use.
+            <strong>Linux (desktop app)</strong> — a focus-loss blur overlay, the same mechanism as
+            the browser. This is best-effort: Linux exposes no universal API to hard-block screen
+            capture on either Wayland or X11, and we won&apos;t pretend otherwise. Android remains
+            the platform with a true OS-level hard block.
           </li>
         </ul>
         <p>

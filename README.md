@@ -45,7 +45,7 @@ Full details in [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
 - 📵 Screenshot protection — hard block on Android, instant blur on iOS and browser
 - 🫥 Invisible watermarking for leak attribution
 - 🪪 No phone number, email, or name required
-- 🖥️ Native Linux desktop app — .deb, .AppImage, .rpm — with OS-level screenshot inhibit on Wayland
+- 🖥️ Native Linux desktop app — .deb, .AppImage, .rpm — with libsecret key storage and focus-loss screenshot blur
 
 ### v1.5 — the security onion
 

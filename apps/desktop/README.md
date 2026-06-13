@@ -4,11 +4,11 @@ A native Linux desktop build of Sublemonable, packaged with [Tauri v2](https://t
 Tauri was chosen over Electron deliberately: **no bundled Chromium**, a small Rust backend, and a
 much smaller attack surface. The UI is the exact same React app as the browser client
 ([`apps/web`](../web)) — it is **not** duplicated here. This crate adds only the three things a
-browser cannot do:
+browser cannot do as well, or that benefit from a native host:
 
-1. **OS-level screenshot inhibit** (Wayland hard block / X11 best-effort)
-2. **libsecret keystore** (GNOME Keyring / KWallet) with an encrypted file fallback
-3. **Tor-first SOCKS5 detection**
+1. **libsecret keystore** (GNOME Keyring / KWallet) with an encrypted file fallback
+2. **Tor-first SOCKS5 detection**
+3. **Native window focus signal** driving the best-effort screenshot blur overlay
 
 ## Packages
 
@@ -42,11 +42,18 @@ sudo rpm -i sublemonable-1.0.0-1.x86_64.rpm
 
 ## Screenshot protection
 
-- **Wayland (GNOME Shell, KDE Plasma):** a **hard block** via `xdg-desktop-portal` — equivalent to
-  Android `FLAG_SECURE`. This is the recommended environment for the strongest protection.
-- **X11:** **best-effort only.** X11 has no mechanism that can prevent screen capture — any client
-  can read the root window — so we are honest about it: the focus-loss blur overlay (the same one the
-  web client uses) is the protection you get on X11. Prefer a Wayland session for confidential use.
+Screenshot protection on Linux uses a **focus-loss blur overlay**, the same mechanism as the browser
+app: when the window loses focus the message content is blurred. This is **best-effort** — Linux does
+not expose a universal API to hard-block screen capture, on either Wayland or X11:
+
+- On **X11**, any client can read the root window, so capture cannot be prevented.
+- On **Wayland**, capture is mediated by the compositor and there is no standard
+  `xdg-desktop-portal` (or other portable) interface an app can call to forbid screenshots of its
+  window. (The portal `Inhibit` API only blocks idle/suspend/logout — not screen capture — so we do
+  not use it; doing so would imply a protection it does not provide.)
+
+If you need an OS-level hard block on message content, the Android client (`FLAG_SECURE`) is the
+platform that can provide it.
 
 ## Key storage
 

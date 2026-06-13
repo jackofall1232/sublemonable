@@ -538,7 +538,7 @@
           "deliverables": [
             "apps/desktop — Tauri v2 app scaffold",
             "apps/desktop/src-tauri/src/keystore.rs — libsecret + file fallback vault storage",
-            "apps/desktop/src-tauri/src/screenshot.rs — xdg-desktop-portal Wayland inhibit + X11 best-effort",
+            "apps/desktop/src-tauri/src/screenshot.rs — best-effort focus-loss blur signal (no OS-level hard block exists on Linux; Wayland and X11 both fall back to the browser-style blur overlay)",
             "apps/desktop/src-tauri/src/tor.rs — SOCKS5 proxy config and connectivity check",
             "apps/desktop/src-tauri/tauri.conf.json — bundle targets: .deb (primary), .AppImage, .rpm",
             "packages/crypto/src/platform.ts — isTauri() runtime detection",

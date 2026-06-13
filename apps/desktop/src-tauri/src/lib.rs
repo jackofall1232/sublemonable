@@ -5,10 +5,11 @@
 
 //! Tauri application host for the Sublemonable Linux desktop app.
 //!
-//! The UI is the existing `apps/web` React build — this crate adds only the
-//! three things a browser cannot do: a libsecret keystore, OS-level screenshot
-//! inhibit, and Tor-first SOCKS5 detection. No message content and no secret
-//! bytes are ever logged here.
+//! The UI is the existing `apps/web` React build — this crate adds a native
+//! host: a libsecret keystore, Tor-first SOCKS5 detection, and a window focus
+//! signal that drives the best-effort screenshot blur overlay (Linux has no
+//! OS-level screenshot hard block; see `screenshot.rs`). No message content and
+//! no secret bytes are ever logged here.
 
 mod keystore;
 mod screenshot;
@@ -28,9 +29,8 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // Activate the screenshot inhibit before the user can see content,
-            // and wire the focus-driven inhibit lifecycle on the main window.
-            window::inhibit_on_ready(&handle);
+            // Harden the main window and wire the focus-loss blur signal (the
+            // best-effort screenshot defense — Linux has no OS-level hard block).
             if let Some(main) = app.get_webview_window("main") {
                 window::harden(&main);
             }
@@ -47,8 +47,6 @@ pub fn run() {
             keystore::store_vault,
             keystore::load_vault,
             keystore::delete_vault,
-            screenshot::inhibit_screenshots,
-            screenshot::release_inhibit,
             tor::get_proxy_config,
             tor::set_proxy_config,
             tor::check_tor_connectivity,

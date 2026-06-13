@@ -121,9 +121,10 @@ export default function DownloadPage() {
             </a>
           </div>
           <p className="mt-5 leading-relaxed text-ink-secondary">
-            On <span className="text-ink-primary">Wayland</span> (GNOME, KDE Plasma) the desktop app
-            applies an OS-level screenshot hard block — the same protection as Android FLAG_SECURE.
-            On X11 that protection is best-effort, so prefer a Wayland session for confidential use.
+            Screenshot protection on the desktop app is a focus-loss blur overlay — the same
+            mechanism as the browser. It&apos;s best-effort: Linux has no universal way to hard-block
+            screen capture on Wayland or X11. For an OS-level hard block on message content, the
+            Android app is the platform that provides it.
           </p>
         </section>
 

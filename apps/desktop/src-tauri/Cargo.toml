@@ -24,16 +24,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 # libsecret (Secret Service) bindings for the primary keystore backend.
 secret-service = { version = "4", features = ["rt-tokio-crypto-rust"] }
-# xdg-desktop-portal client — screenshot inhibit on Wayland.
-# default-features = false drops the async-std backend (ashpd enables it by
-# default); we use the tokio backend to match the rest of the app.
-ashpd = { version = "0.9", default-features = false, features = ["tokio"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -114,8 +114,7 @@ purged after 7 days.
 | Android | `WindowManager.LayoutParams.FLAG_SECURE` on every Activity with message content | OS-level hard block — captures show black |
 | iOS | `UIScreen.capturedDidChangeNotification` → instant blur overlay; `userDidTakeScreenshotNotification` → warning banner | Real-time blur for recording; detection (not prevention) for stills |
 | Web | `visibilitychange` + window blur → `filter: blur(24px) grayscale(1)` on the message container within 120 ms | Best-effort — full OS-level prevention is out of scope in a browser |
-| Linux (Wayland) | xdg-desktop-portal ScreenSaver inhibit via ashpd | Hard block on supporting compositors (GNOME Shell, KDE Plasma on Wayland) — equivalent to Android FLAG_SECURE |
-| Linux (X11) | Window compositor hints (_NET_WM_BYPASS_COMPOSITOR) + focus-loss blur overlay | Best-effort — X11 cannot provide a hard block; Wayland is recommended for strongest protection |
+| Linux (Wayland & X11) | Focus-loss blur overlay (same mechanism as the browser) | Best-effort — no compositor-agnostic API exists on Linux to hard-block screen capture |
 
 The web client additionally embeds an **invisible watermark** (canvas steganography encoding
 `recipient_id` + timestamp into message backgrounds) so a leaked screenshot can be attributed to
@@ -145,8 +144,9 @@ the recipient who leaked it.
 
 - A compromised device (OS-level keyloggers)
 - Rubber-hose cryptanalysis
-- Full OS-level screenshot prevention in a browser or on X11 (Wayland provides a hard block
-  equivalent to Android)
+- Full OS-level screenshot prevention in a browser or on Linux desktop (Linux exposes no
+  compositor-agnostic hard-block API; the desktop app falls back to the same best-effort blur as
+  the browser)
 
 ## Tor routing
 
