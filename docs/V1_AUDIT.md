@@ -46,7 +46,18 @@ master's `certificate_pinning.web` note.
 `go.mod` and the README use a newer Go than the spec floor. Newer is fine and not a violation; noted
 only for completeness.
 
-### 6. `apps/web` is not Prettier-clean — PRE-EXISTING, MINOR
+### 6. `envelopes.recipient_id` foreign key enabled account enumeration — FIXED
+
+The v1 `envelopes` table declared `recipient_id UUID NOT NULL REFERENCES accounts(id)`. Validating
+recipient existence at send time meant a sender could enumerate which UUIDs are registered by
+observing send success versus a foreign-key failure — a metadata leak inconsistent with the
+zero-knowledge model. It also made v1.5 decoy traffic (addressed to random UUIDs that "resolve to
+nowhere") **distinguishable** from real sends, defeating the cover-traffic guarantee. Fixed: dropped
+the foreign key (the relay is dumb by design and stores any envelope, letting the TTL purge what is
+never collected), with an `ALTER TABLE … DROP CONSTRAINT IF EXISTS` for existing deployments, and
+made account deletion purge pending envelopes explicitly in a transaction.
+
+### 7. `apps/web` is not Prettier-clean — PRE-EXISTING, MINOR
 
 `pnpm --filter @sublemonable/web lint` reports formatting issues in several pre-existing `apps/web`
 source files (e.g. `store.ts`, `screens/*`). These predate the v1.5 work. Files touched during v1.5

@@ -16,6 +16,11 @@ SELECT identity_key FROM accounts WHERE id = $1;
 -- name: DeleteAccount :exec
 DELETE FROM accounts WHERE id = $1;
 
+-- Envelopes carry no FK to accounts (see schema.sql), so account deletion purges
+-- their pending envelopes explicitly, in the same transaction.
+-- name: DeleteEnvelopesByRecipient :exec
+DELETE FROM envelopes WHERE recipient_id = $1;
+
 -- name: UpsertSignedPrekey :exec
 INSERT INTO signed_prekeys (account_id, prekey_id, public_key, signature)
 VALUES ($1, $2, $3, $4)

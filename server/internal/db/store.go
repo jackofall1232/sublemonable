@@ -57,11 +57,23 @@ func (s *Store) GetAccountIdentityKey(ctx context.Context, id uuid.UUID) ([]byte
 	return key, err
 }
 
-// DeleteAccount is a full purge: prekeys, pending envelopes, refresh tokens,
-// and the account record all cascade. Irreversible by design.
+// DeleteAccount is a full purge: prekeys and refresh tokens cascade from the
+// account record; pending envelopes are deleted explicitly because envelopes
+// intentionally carry no foreign key to accounts (see schema.sql). Irreversible
+// by design.
 func (s *Store) DeleteAccount(ctx context.Context, id uuid.UUID) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM accounts WHERE id = $1`, id)
-	return err
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM envelopes WHERE recipient_id = $1`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM accounts WHERE id = $1`, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // ── prekeys ──────────────────────────────────────────────────────────────────

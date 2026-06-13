@@ -30,12 +30,22 @@ CREATE TABLE IF NOT EXISTS one_time_prekeys (
 
 -- Store-and-forward only: rows are deleted on delivery ack, or purged when
 -- undelivered past the TTL. The payload is an opaque encrypted envelope.
+--
+-- recipient_id has NO foreign key to accounts, deliberately. Validating that the
+-- recipient exists would (a) let a sender enumerate which UUIDs are registered by
+-- observing send success vs failure, and (b) make decoy traffic — addressed to
+-- random UUIDs that resolve to nowhere — distinguishable from real sends. The
+-- relay is dumb by design: it stores any envelope and lets the TTL purge what is
+-- never collected. Account deletion cleans up pending envelopes explicitly (see
+-- DeleteAccount) since there is no cascade.
 CREATE TABLE IF NOT EXISTS envelopes (
     id           UUID PRIMARY KEY,
-    recipient_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    recipient_id UUID NOT NULL,
     payload      BYTEA NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Drop the v1 foreign key if migrating an existing deployment.
+ALTER TABLE envelopes DROP CONSTRAINT IF EXISTS envelopes_recipient_id_fkey;
 CREATE INDEX IF NOT EXISTS envelopes_recipient_idx ON envelopes (recipient_id, created_at);
 CREATE INDEX IF NOT EXISTS envelopes_created_idx   ON envelopes (created_at);
 
