@@ -65,3 +65,16 @@ RETURNING account_id;
 
 -- name: DeleteAccountRefreshTokens :exec
 DELETE FROM refresh_tokens WHERE account_id = $1;
+
+-- Dead drops (v1.5). No sender column exists, by design.
+
+-- name: DepositDrop :execrows
+INSERT INTO drops (drop_id, ciphertext, expires_at)
+VALUES ($1, $2, $3) ON CONFLICT (drop_id) DO NOTHING;
+
+-- name: RedeemDrop :one
+DELETE FROM drops WHERE drop_id = $1 AND expires_at > now()
+RETURNING ciphertext;
+
+-- name: PurgeExpiredDrops :execrows
+DELETE FROM drops WHERE expires_at <= $1;

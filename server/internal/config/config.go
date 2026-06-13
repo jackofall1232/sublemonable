@@ -22,6 +22,12 @@ type Config struct {
 	MessageTTLUndeliveredHours int
 	RateLimitEnabled           bool
 	TorEnabled                 bool
+	// v1.5 — Tor-first + dead drops + multi-hop relay.
+	OnionAddress      string // v3 .onion address this deployment is reachable at
+	DropTTLHours      int    // dead-drop lifetime, collected or not
+	DropPoWDifficulty int    // leading zero bits required on deposit proof-of-work
+	RelayPrivateKey   string // base64 Curve25519 private key; enables /relay/forward when set
+	RelayPublicKey    string // base64 Curve25519 public key advertised in the relay registry
 }
 
 func Load() (*Config, error) {
@@ -36,6 +42,11 @@ func Load() (*Config, error) {
 		MessageTTLUndeliveredHours: envInt("MESSAGE_TTL_UNDELIVERED_HOURS", 72),
 		RateLimitEnabled:           envBool("RATE_LIMIT_ENABLED", true),
 		TorEnabled:                 envBool("TOR_ENABLED", false),
+		OnionAddress:               os.Getenv("ONION_ADDRESS"),
+		DropTTLHours:               envInt("DROP_TTL_HOURS", 72),
+		DropPoWDifficulty:          envInt("DROP_POW_DIFFICULTY", 20),
+		RelayPrivateKey:            os.Getenv("RELAY_PRIVATE_KEY"),
+		RelayPublicKey:             os.Getenv("RELAY_PUBLIC_KEY"),
 	}
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")

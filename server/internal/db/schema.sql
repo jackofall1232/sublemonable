@@ -53,3 +53,16 @@ CREATE TABLE IF NOT EXISTS delivery_receipts (
     message_id_hash BYTEA PRIMARY KEY,
     delivered_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Dead drops (v1.5): anonymous asynchronous deposits. Stored under the hash of a
+-- one-time token (drop_id = SHA-256(token)); the relay never sees the token until
+-- redemption. There is intentionally NO sender column — the relay cannot know who
+-- deposited, and redemption requires no account. A drop is single-use and is
+-- destroyed on pickup or when its TTL expires, whichever comes first.
+CREATE TABLE IF NOT EXISTS drops (
+    drop_id    BYTEA PRIMARY KEY,        -- SHA-256(token); no sender field, by design
+    ciphertext BYTEA NOT NULL,           -- opaque, padded encrypted envelope
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS drops_expires_idx ON drops (expires_at);

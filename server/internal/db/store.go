@@ -11,6 +11,7 @@ package db
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"time"
 
@@ -18,6 +19,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrDropExists is returned when a deposit collides with an existing drop ID.
+var ErrDropExists = errors.New("drop already exists")
 
 //go:embed schema.sql
 var schemaSQL string
@@ -189,6 +193,42 @@ func (s *Store) RecordDeliveryReceipt(ctx context.Context, messageIDHash []byte)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO delivery_receipts (message_id_hash) VALUES ($1) ON CONFLICT DO NOTHING`, messageIDHash)
 	return err
+}
+
+// ── dead drops (v1.5, anonymous store-and-forward) ───────────────────────────
+
+// DepositDrop stores an encrypted envelope under a drop ID (hash of a one-time
+// token). No sender is recorded — the table has no column for it. A duplicate
+// drop ID is rejected so a token cannot be silently overwritten.
+func (s *Store) DepositDrop(ctx context.Context, dropID, ciphertext []byte, expiresAt time.Time) error {
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO drops (drop_id, ciphertext, expires_at)
+		VALUES ($1, $2, $3) ON CONFLICT (drop_id) DO NOTHING`,
+		dropID, ciphertext, expiresAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrDropExists
+	}
+	return nil
+}
+
+// RedeemDrop returns and destroys a drop in a single statement — single-use by
+// design. A second redemption of the same token hits no row and returns
+// pgx.ErrNoRows, which the handler maps to 404. Expired drops are not returned.
+func (s *Store) RedeemDrop(ctx context.Context, dropID []byte) ([]byte, error) {
+	var ciphertext []byte
+	err := s.pool.QueryRow(ctx, `
+		DELETE FROM drops WHERE drop_id = $1 AND expires_at > now()
+		RETURNING ciphertext`, dropID).Scan(&ciphertext)
+	return ciphertext, err
+}
+
+// PurgeExpiredDrops deletes drops past their TTL whether collected or not.
+func (s *Store) PurgeExpiredDrops(ctx context.Context, now time.Time) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM drops WHERE expires_at <= $1`, now)
+	return tag.RowsAffected(), err
 }
 
 // ── refresh tokens ───────────────────────────────────────────────────────────
