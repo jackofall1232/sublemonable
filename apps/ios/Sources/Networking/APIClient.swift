@@ -30,7 +30,7 @@ public actor APIClient {
 
     /// Self-hosters point this at their own deployment (and replace the
     /// certificate pin in PinnedSessionDelegate.swift).
-    public static let defaultBaseURL = URL(string: "https://api.sublemonable.example")!
+    public static let defaultBaseURL = URL(string: "https://relay.sublemonable.com")!
 
     private let baseURL: URL
     private let session: URLSession

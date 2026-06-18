@@ -67,7 +67,7 @@ public final class WebSocketClient: NSObject {
         super.init()
     }
 
-    public static let defaultURL = URL(string: "wss://api.sublemonable.example/ws")!
+    public static let defaultURL = URL(string: "wss://relay.sublemonable.com/ws")!
 
     public func setAccessTokenProvider(_ provider: @escaping () async -> String?) {
         accessTokenProvider = provider
