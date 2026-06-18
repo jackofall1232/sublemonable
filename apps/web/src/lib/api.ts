@@ -11,6 +11,7 @@ import type {
   DropDepositResponse,
   DropRedeemResponse,
 } from "@sublemonable/protocol";
+import { isTauri, nativeRequest } from "./nativeTransport.js";
 
 export const SERVER_URL: string =
   (import.meta.env.VITE_SERVER_URL as string | undefined) ?? "http://localhost:8443";
@@ -26,6 +27,29 @@ interface TokenPair {
 async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
+
+  // Desktop (Tauri): route through the native certificate-pinned client. The
+  // browser PWA falls through to fetch below, unchanged.
+  if (isTauri()) {
+    const { status, body } = await nativeRequest(
+      init.method ?? "GET",
+      `${SERVER_URL}${path}`,
+      headers,
+      init.body as string | undefined,
+    );
+    if (status < 200 || status >= 300) {
+      let code = "request_failed";
+      try {
+        code = (JSON.parse(body) as { error?: string }).error ?? code;
+      } catch {
+        /* body absent */
+      }
+      throw new ApiError(status, code);
+    }
+    if (status === 204 || body === "") return undefined as T;
+    return JSON.parse(body) as T;
+  }
+
   const res = await fetch(`${SERVER_URL}${path}`, { ...init, headers });
   if (!res.ok) {
     let code = "request_failed";

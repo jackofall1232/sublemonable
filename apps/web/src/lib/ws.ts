@@ -5,6 +5,7 @@
 
 import type { ClientEvent, ServerEvent } from "@sublemonable/protocol";
 import { WS_URL } from "./api.js";
+import { isTauri, NativeWsSocket } from "./nativeTransport.js";
 
 export type WsStatus = "connecting" | "open" | "closed";
 
@@ -14,7 +15,7 @@ export type WsStatus = "connecting" | "open" | "closed";
  * Authorization). Messages composed while offline queue in memory only.
  */
 export class WsClient {
-  private socket: WebSocket | null = null;
+  private socket: WebSocket | NativeWsSocket | null = null;
   private queue: ClientEvent[] = [];
   private backoffMs = 500;
   private closedByUs = false;
@@ -29,7 +30,11 @@ export class WsClient {
     this.closedByUs = false;
     this.onStatus("connecting");
     const token = await this.getToken();
-    const socket = new WebSocket(WS_URL, [token]);
+    // Desktop (Tauri): pinned native WebSocket. Browser: standard WebSocket with
+    // the JWT as the Sec-WebSocket-Protocol value. Both expose the same surface.
+    const socket: WebSocket | NativeWsSocket = isTauri()
+      ? new NativeWsSocket(token)
+      : new WebSocket(WS_URL, [token]);
     this.socket = socket;
 
     socket.onopen = () => {

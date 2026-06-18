@@ -12,8 +12,10 @@
 //! no secret bytes are ever logged here.
 
 mod keystore;
+mod pinning;
 mod screenshot;
 mod tor;
+mod transport;
 mod window;
 
 use tauri::Manager;
@@ -22,10 +24,19 @@ use tauri::Manager;
 pub fn run() {
     init_tracing();
 
+    // Build the pinned TLS config once and share it across the REST client and
+    // every WebSocket dial. Building before the app starts means a broken pin
+    // setup fails to launch rather than silently running unpinned.
+    let tls = transport::pinned_tls_config();
+    let http = transport::build_http_client(tls.clone());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .manage(transport::PinnedHttp(http))
+        .manage(transport::PinnedTls(tls))
+        .manage(transport::WsRegistry::default())
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -50,6 +61,10 @@ pub fn run() {
             tor::get_proxy_config,
             tor::set_proxy_config,
             tor::check_tor_connectivity,
+            transport::pinned_request,
+            transport::ws_open,
+            transport::ws_send,
+            transport::ws_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sublemonable desktop application");
