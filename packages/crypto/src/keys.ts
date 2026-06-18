@@ -77,10 +77,7 @@ export async function verifySignedPrekey(
 }
 
 /** One-time prekeys are single-use by design — the private half is deleted after consumption. */
-export async function generateOneTimePrekeys(
-  count: number,
-  startId = 1,
-): Promise<OneTimePrekey[]> {
+export async function generateOneTimePrekeys(count: number, startId = 1): Promise<OneTimePrekey[]> {
   await ready();
   return Array.from({ length: count }, (_, i) => {
     const kp = sodium.crypto_box_keypair();
@@ -101,14 +98,10 @@ export async function signWithIdentity(
  * Safety Number for contact verification: SHA-512 over both identity keys,
  * ordered lexicographically so both sides compute the same value.
  */
-export async function safetyNumber(
-  identityA: Uint8Array,
-  identityB: Uint8Array,
-): Promise<string> {
+export async function safetyNumber(identityA: Uint8Array, identityB: Uint8Array): Promise<string> {
   await ready();
-  const [first, second] = compareBytes(identityA, identityB) <= 0
-    ? [identityA, identityB]
-    : [identityB, identityA];
+  const [first, second] =
+    compareBytes(identityA, identityB) <= 0 ? [identityA, identityB] : [identityB, identityA];
   const joined = new Uint8Array(first.length + second.length);
   joined.set(first, 0);
   joined.set(second, first.length);

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Sublemonable",
+  "version": "1.0.0",
+  "identifier": "org.sublemonable.app",
+  "build": {
+    "frontendDist": "../../web/dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "pnpm --filter @sublemonable/web dev",
+    "beforeBuildCommand": "pnpm --filter @sublemonable/web build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Sublemonable",
+        "width": 1024,
+        "height": 720,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https: wss: http://localhost:* ws://localhost:*"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage", "rpm"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "SocialNetworking",
+    "shortDescription": "Zero-knowledge E2EE ephemeral messaging",
+    "longDescription": "Sublemonable is end-to-end encrypted ephemeral messaging. Every message is encrypted on your device before it leaves. Messages burn on read or self-destruct on a timer. Zero-knowledge server — plaintext never leaves your device.",
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libsecret-1-0",
+          "libgtk-3-0",
+          "libglib2.0-0"
+        ],
+        "section": "net",
+        "priority": "optional",
+        "changelog": "CHANGELOG.md"
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      },
+      "rpm": {
+        "release": "1"
+      }
+    }
+  }
+}

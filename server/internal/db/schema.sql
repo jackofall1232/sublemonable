@@ -30,12 +30,22 @@ CREATE TABLE IF NOT EXISTS one_time_prekeys (
 
 -- Store-and-forward only: rows are deleted on delivery ack, or purged when
 -- undelivered past the TTL. The payload is an opaque encrypted envelope.
+--
+-- recipient_id has NO foreign key to accounts, deliberately. Validating that the
+-- recipient exists would (a) let a sender enumerate which UUIDs are registered by
+-- observing send success vs failure, and (b) make decoy traffic — addressed to
+-- random UUIDs that resolve to nowhere — distinguishable from real sends. The
+-- relay is dumb by design: it stores any envelope and lets the TTL purge what is
+-- never collected. Account deletion cleans up pending envelopes explicitly (see
+-- DeleteAccount) since there is no cascade.
 CREATE TABLE IF NOT EXISTS envelopes (
     id           UUID PRIMARY KEY,
-    recipient_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    recipient_id UUID NOT NULL,
     payload      BYTEA NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Drop the v1 foreign key if migrating an existing deployment.
+ALTER TABLE envelopes DROP CONSTRAINT IF EXISTS envelopes_recipient_id_fkey;
 CREATE INDEX IF NOT EXISTS envelopes_recipient_idx ON envelopes (recipient_id, created_at);
 CREATE INDEX IF NOT EXISTS envelopes_created_idx   ON envelopes (created_at);
 
@@ -53,3 +63,16 @@ CREATE TABLE IF NOT EXISTS delivery_receipts (
     message_id_hash BYTEA PRIMARY KEY,
     delivered_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Dead drops (v1.5): anonymous asynchronous deposits. Stored under the hash of a
+-- one-time token (drop_id = SHA-256(token)); the relay never sees the token until
+-- redemption. There is intentionally NO sender column — the relay cannot know who
+-- deposited, and redemption requires no account. A drop is single-use and is
+-- destroyed on pickup or when its TTL expires, whichever comes first.
+CREATE TABLE IF NOT EXISTS drops (
+    drop_id    BYTEA PRIMARY KEY,        -- SHA-256(token); no sender field, by design
+    ciphertext BYTEA NOT NULL,           -- opaque, padded encrypted envelope
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS drops_expires_idx ON drops (expires_at);

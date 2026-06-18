@@ -3,7 +3,7 @@
 // See the LICENSE file in the repository root for full license text.
 // SPDX-License-Identifier: AGPL-3.0-only
 
-const PLATFORMS = ["iOS", "Android", "Browser — no install needed"];
+const PLATFORMS = ["iOS", "Android", "Linux (.deb · .AppImage)", "Browser — no install needed"];
 
 export function PlatformBadges() {
   return (

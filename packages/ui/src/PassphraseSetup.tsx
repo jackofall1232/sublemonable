@@ -23,9 +23,11 @@ export function PassphraseSetup({ mode, onSubmit, busy = false, error }: Passphr
   const [passphrase, setPassphrase] = useState("");
   const [confirm, setConfirm] = useState("");
 
-  const strength = mode === "setup" ? passphraseStrength(passphrase) : passphrase ? SEGMENT_COUNT : 0;
+  const strength =
+    mode === "setup" ? passphraseStrength(passphrase) : passphrase ? SEGMENT_COUNT : 0;
   const confirmed = mode === "unlock" || (confirm.length > 0 && confirm === passphrase);
-  const canSubmit = !busy && passphrase.length > 0 && (mode === "unlock" || (strength >= 5 && confirmed));
+  const canSubmit =
+    !busy && passphrase.length > 0 && (mode === "unlock" || (strength >= 5 && confirmed));
 
   return (
     <form
@@ -47,7 +49,12 @@ export function PassphraseSetup({ mode, onSubmit, busy = false, error }: Passphr
       {busy ? (
         <LemonSlice variant="loading_spinner" size={96} label="Deriving keys" />
       ) : (
-        <LemonSlice variant="security_indicator" segments={strength} size={96} label="Passphrase strength" />
+        <LemonSlice
+          variant="security_indicator"
+          segments={strength}
+          size={96}
+          label="Passphrase strength"
+        />
       )}
 
       <h1
@@ -94,7 +101,14 @@ export function PassphraseSetup({ mode, onSubmit, busy = false, error }: Passphr
       )}
 
       {error && (
-        <span role="alert" style={{ color: color.semantic.error, fontFamily: typography.body.family, fontSize: "0.875rem" }}>
+        <span
+          role="alert"
+          style={{
+            color: color.semantic.error,
+            fontFamily: typography.body.family,
+            fontSize: "0.875rem",
+          }}
+        >
           {error}
         </span>
       )}

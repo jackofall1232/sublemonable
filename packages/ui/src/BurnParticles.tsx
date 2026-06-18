@@ -30,7 +30,10 @@ export function BurnParticles({ active }: { active: boolean }) {
 
   if (!active) return null;
   return (
-    <div aria-hidden style={{ position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }}>
+    <div
+      aria-hidden
+      style={{ position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }}
+    >
       {particles.map((p, i) => (
         <span
           key={i}

@@ -19,6 +19,8 @@ importers:
         specifier: ^5.5.4
         version: 5.9.3
 
+  apps/desktop: {}
+
   apps/web:
     dependencies:
       '@sublemonable/crypto':
@@ -27,6 +29,9 @@ importers:
       '@sublemonable/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@sublemonable/relay-client':
+        specifier: workspace:*
+        version: link:../../packages/relay-client
       '@sublemonable/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -88,6 +93,22 @@ importers:
         version: 2.1.9(@types/node@20.19.43)
 
   packages/protocol:
+    devDependencies:
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.5
+        version: 2.1.9(@types/node@20.19.43)
+
+  packages/relay-client:
+    dependencies:
+      '@sublemonable/crypto':
+        specifier: workspace:*
+        version: link:../crypto
+      '@sublemonable/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
       typescript:
         specifier: ^5.5.4

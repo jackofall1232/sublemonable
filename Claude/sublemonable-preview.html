@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sublemonable — Design Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --lemon: #F5E642;
+    --lemon-bright: #FFE500;
+    --lemon-deep: #D4C200;
+    --lemon-pale: #FFFDE0;
+    --lemon-zest: #E8B800;
+    --rind: #2A2500;
+    --rind-soft: #3D3800;
+    --bg-primary: #0D0C00;
+    --bg-secondary: #1A1800;
+    --bg-elevated: #242100;
+    --text-primary: #FAFAF2;
+    --text-secondary: #A8A070;
+    --text-muted: #5A5630;
+    --border: #2E2B00;
+    --burn-red: #FF4444;
+    --burn-orange: #FF8C00;
+    --verified-green: #4ADE80;
+    --font-display: 'Inter', system-ui, sans-serif;
+    --font-body: 'Inter', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-fast: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── LAYOUT ── */
+  .preview-grid {
+    display: grid;
+    grid-template-columns: 1fr 380px 1fr;
+    grid-template-rows: auto 1fr auto;
+    min-height: 100vh;
+    gap: 0;
+  }
+
+  /* ── HEADER ── */
+  .site-header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 40px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-primary);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .wordmark {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.125rem;
+    letter-spacing: 0.12em;
+    color: var(--lemon);
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .header-nav {
+    display: flex;
+    gap: 32px;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+  }
+
+  .header-nav a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: color 200ms;
+    cursor: pointer;
+  }
+
+  .header-nav a:hover { color: var(--lemon); }
+
+  .header-cta {
+    background: var(--lemon);
+    color: var(--bg-primary);
+    border: none;
+    padding: 8px 20px;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--font-body);
+    transition: background 200ms, box-shadow 200ms;
+  }
+  .header-cta:hover {
+    background: var(--lemon-bright);
+    box-shadow: 0 0 20px rgba(245,230,66,0.35);
+  }
+
+  /* ── LEMON SLICE SVG ── */
+  .lemon-slice {
+    display: block;
+  }
+
+  /* ── LEFT PANEL — MARKETING ── */
+  .panel-left {
+    padding: 48px 40px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    border-right: 1px solid var(--border);
+  }
+
+  .hero-tag {
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--lemon);
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .hero-tag::before {
+    content: '';
+    display: block;
+    width: 20px;
+    height: 1px;
+    background: var(--lemon);
+  }
+
+  .hero-headline {
+    font-family: var(--font-display);
+    font-size: 3.5rem;
+    font-weight: 700;
+    line-height: 1.0;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+  }
+
+  .hero-headline .accent { color: var(--lemon); }
+
+  .hero-sub {
+    font-family: var(--font-display);
+    font-size: 3.5rem;
+    font-weight: 700;
+    line-height: 1.0;
+    letter-spacing: -0.03em;
+    color: var(--text-muted);
+    margin-bottom: 24px;
+  }
+
+  .hero-body {
+    font-size: 1rem;
+    line-height: 1.65;
+    color: var(--text-secondary);
+    max-width: 380px;
+    margin-bottom: 40px;
+  }
+
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+
+  .btn-primary {
+    background: var(--lemon);
+    color: var(--bg-primary);
+    border: none;
+    padding: 12px 28px;
+    border-radius: 9999px;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--font-body);
+    transition: all 200ms var(--ease-fast);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-primary:hover {
+    background: var(--lemon-bright);
+    box-shadow: 0 0 28px rgba(245,230,66,0.3);
+    transform: translateY(-1px);
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    padding: 12px 28px;
+    border-radius: 9999px;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: var(--font-body);
+    transition: all 200ms;
+  }
+  .btn-ghost:hover {
+    border-color: var(--lemon);
+    color: var(--lemon);
+  }
+
+  .feature-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 48px;
+  }
+
+  .pill {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    padding: 5px 12px;
+    border-radius: 9999px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pill-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--lemon);
+    flex-shrink: 0;
+  }
+  .pill-dot.green { background: var(--verified-green); }
+  .pill-dot.orange { background: var(--burn-orange); }
+
+  /* ── CENTER — PHONE MOCKUP ── */
+  .panel-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 20px;
+    position: relative;
+  }
+
+  .phone-frame {
+    width: 340px;
+    height: 680px;
+    background: var(--bg-secondary);
+    border-radius: 40px;
+    border: 1.5px solid var(--border);
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 32px 80px rgba(0,0,0,0.6), 0 0 60px rgba(245,230,66,0.06);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* notch */
+  .phone-notch {
+    width: 120px;
+    height: 28px;
+    background: var(--bg-primary);
+    border-radius: 0 0 18px 18px;
+    margin: 0 auto;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .notch-cam {
+    width: 8px; height: 8px;
+    background: #1a1a1a;
+    border-radius: 50%;
+    border: 1px solid #333;
+  }
+
+  /* chat header */
+  .chat-header {
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .back-btn {
+    color: var(--lemon);
+    font-size: 1.2rem;
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .avatar {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--lemon) 0%, var(--lemon-zest) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--bg-primary);
+    flex-shrink: 0;
+  }
+
+  .chat-meta { flex: 1; }
+  .chat-name {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.2;
+  }
+  .chat-status {
+    font-size: 0.6875rem;
+    color: var(--verified-green);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .chat-status::before {
+    content: '';
+    display: block;
+    width: 5px; height: 5px;
+    background: var(--verified-green);
+    border-radius: 50%;
+  }
+
+  .e2ee-badge {
+    font-size: 0.6rem;
+    font-family: var(--font-mono);
+    color: var(--lemon);
+    opacity: 0.7;
+    letter-spacing: 0.04em;
+  }
+
+  /* message list */
+  .message-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    scrollbar-width: none;
+  }
+  .message-list::-webkit-scrollbar { display: none; }
+
+  .date-divider {
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    color: var(--text-muted);
+    margin: 8px 0;
+    letter-spacing: 0.08em;
+  }
+
+  .msg {
+    display: flex;
+    flex-direction: column;
+    max-width: 75%;
+    animation: msgIn 300ms var(--ease-spring) both;
+  }
+
+  @keyframes msgIn {
+    from { opacity: 0; transform: translateY(8px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .msg.sent { align-self: flex-end; align-items: flex-end; }
+  .msg.received { align-self: flex-start; align-items: flex-start; }
+
+  .bubble {
+    padding: 9px 13px;
+    font-size: 0.875rem;
+    line-height: 1.45;
+    position: relative;
+  }
+
+  .msg.sent .bubble {
+    background: var(--lemon);
+    color: var(--bg-primary);
+    border-radius: 16px 16px 3px 16px;
+    font-weight: 500;
+  }
+
+  .msg.received .bubble {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 16px 16px 16px 3px;
+  }
+
+  .msg-meta {
+    font-size: 0.625rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    margin-top: 3px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .burn-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.6rem;
+    color: var(--burn-orange);
+    font-family: var(--font-mono);
+  }
+
+  /* burn timer ring on bubble */
+  .bubble-timer {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+  }
+
+  /* burning message */
+  .msg.burning .bubble {
+    animation: burn 600ms var(--ease-fast) forwards;
+  }
+
+  @keyframes burn {
+    0% { opacity: 1; transform: scale(1); filter: none; }
+    40% { opacity: 0.8; transform: scale(1.03); filter: brightness(1.5) saturate(2); }
+    100% { opacity: 0; transform: scale(0.6) translateY(-12px); filter: brightness(3) blur(4px); }
+  }
+
+  /* compose bar */
+  .compose-bar {
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    background: var(--bg-secondary);
+  }
+
+  .compose-input {
+    flex: 1;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    padding: 9px 14px;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    outline: none;
+    transition: border-color 200ms;
+  }
+  .compose-input:focus {
+    border-color: var(--lemon);
+  }
+  .compose-input::placeholder { color: var(--text-muted); }
+
+  .attach-btn {
+    width: 36px; height: 36px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 200ms;
+    flex-shrink: 0;
+  }
+  .attach-btn:hover { color: var(--lemon); }
+
+  .send-btn {
+    width: 38px; height: 38px;
+    background: var(--lemon);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 200ms var(--ease-spring);
+    flex-shrink: 0;
+  }
+  .send-btn:hover {
+    background: var(--lemon-bright);
+    box-shadow: 0 0 16px rgba(245,230,66,0.45);
+    transform: scale(1.08);
+  }
+  .send-btn:active { transform: scale(0.92); }
+
+  .send-icon {
+    width: 16px; height: 16px;
+    fill: none;
+    stroke: var(--bg-primary);
+    stroke-width: 2.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* ── RIGHT PANEL — DESIGN TOKENS ── */
+  .panel-right {
+    padding: 48px 32px 48px 40px;
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+  }
+
+  .section-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    margin-top: 40px;
+  }
+  .section-label:first-child { margin-top: 0; }
+
+  /* color swatches */
+  .swatch-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .swatch {
+    height: 40px;
+    border-radius: 8px;
+    position: relative;
+    cursor: default;
+  }
+  .swatch-label {
+    font-size: 0.625rem;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    margin-top: 4px;
+    text-align: center;
+  }
+
+  /* type specimens */
+  .type-specimen {
+    margin-bottom: 20px;
+    padding: 16px;
+    background: var(--bg-elevated);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+  .specimen-label {
+    font-size: 0.625rem;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    letter-spacing: 0.08em;
+  }
+  .specimen-display {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+    line-height: 1;
+  }
+  .specimen-body {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-top: 6px;
+  }
+  .specimen-mono {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--lemon);
+    margin-top: 6px;
+    letter-spacing: 0.04em;
+  }
+
+  /* lemon slice showcase */
+  .lemon-showcase {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+
+  .lemon-label {
+    font-size: 0.625rem;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 4px;
+  }
+
+  .slice-wrap { display: flex; flex-direction: column; align-items: center; }
+
+  /* component demos */
+  .component-demo {
+    padding: 16px;
+    background: var(--bg-elevated);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+
+  .fingerprint {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    line-height: 1.8;
+  }
+  .fingerprint span { color: var(--lemon); }
+
+  .security-badge-demo {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(74, 222, 128, 0.1);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+    border-radius: 9999px;
+    padding: 5px 12px;
+    font-size: 0.75rem;
+    color: var(--verified-green);
+  }
+
+  .notif-demo {
+    background: var(--lemon);
+    color: var(--bg-primary);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ── FOOTER ── */
+  .site-footer {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--border);
+    padding: 24px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+  }
+
+  /* ── LEMON SLICE SVG COMPONENT ── */
+  .ls-seg { transition: fill 300ms ease; }
+
+  /* screenshot blur demo */
+  .blur-demo-wrap {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+  }
+  .blur-demo-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(245,230,66,0.04);
+    backdrop-filter: blur(20px) saturate(0);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6875rem;
+    color: var(--lemon);
+    font-family: var(--font-mono);
+    letter-spacing: 0.08em;
+    opacity: 0;
+    transition: opacity 150ms;
+    z-index: 2;
+  }
+  .blur-demo-wrap:hover .blur-demo-overlay { opacity: 1; }
+
+  .blur-demo-inner {
+    background: var(--bg-elevated);
+    border-radius: 6px;
+    padding: 10px;
+    filter: none;
+    transition: filter 150ms;
+  }
+  .blur-demo-wrap:hover .blur-demo-inner { filter: blur(12px) saturate(0); }
+
+  /* animate segments */
+  @keyframes segFill {
+    from { fill: var(--border); }
+    to { fill: var(--lemon); }
+  }
+
+  .animated-slice .ls-seg {
+    fill: var(--border);
+    animation: segFill 200ms var(--ease-fast) both;
+  }
+  .animated-slice .ls-seg:nth-child(1) { animation-delay: 0ms; }
+  .animated-slice .ls-seg:nth-child(2) { animation-delay: 150ms; }
+  .animated-slice .ls-seg:nth-child(3) { animation-delay: 300ms; }
+  .animated-slice .ls-seg:nth-child(4) { animation-delay: 450ms; }
+  .animated-slice .ls-seg:nth-child(5) { animation-delay: 600ms; }
+  .animated-slice .ls-seg:nth-child(6) { animation-delay: 750ms; }
+  .animated-slice .ls-seg:nth-child(7) { animation-delay: 900ms; }
+  .animated-slice .ls-seg:nth-child(8) { animation-delay: 1050ms; }
+
+  /* burn timer animated */
+  .burn-slice .ls-seg {
+    animation: segFill 200ms var(--ease-fast) both reverse;
+    fill: var(--burn-orange);
+  }
+  .burn-slice .ls-seg:nth-child(1) { animation-delay: 0ms; fill: var(--burn-red); }
+  .burn-slice .ls-seg:nth-child(2) { animation-delay: 200ms; fill: var(--burn-orange); }
+  .burn-slice .ls-seg:nth-child(3) { animation-delay: 400ms; fill: var(--lemon-zest); }
+  .burn-slice .ls-seg:nth-child(4) { animation-delay: 600ms; fill: var(--lemon); }
+  .burn-slice .ls-seg:nth-child(5) { fill: var(--border); }
+  .burn-slice .ls-seg:nth-child(6) { fill: var(--border); }
+  .burn-slice .ls-seg:nth-child(7) { fill: var(--border); }
+  .burn-slice .ls-seg:nth-child(8) { fill: var(--border); }
+
+  /* glow pulse */
+  @keyframes glowPulse {
+    0%, 100% { filter: drop-shadow(0 0 6px rgba(245,230,66,0.4)); }
+    50% { filter: drop-shadow(0 0 16px rgba(245,230,66,0.8)); }
+  }
+  .lemon-glow { animation: glowPulse 2.4s ease-in-out infinite; }
+
+  /* spinning loader */
+  @keyframes spinSlice {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .spinning { animation: spinSlice 1.2s linear infinite; transform-origin: center; }
+
+  /* burn message trigger */
+  .burn-trigger {
+    font-size: 0.625rem;
+    color: var(--burn-orange);
+    font-family: var(--font-mono);
+    cursor: pointer;
+    margin-top: 4px;
+    transition: color 150ms;
+  }
+  .burn-trigger:hover { color: var(--burn-red); }
+
+  @media (max-width: 1100px) {
+    .preview-grid {
+      grid-template-columns: 1fr;
+    }
+    .panel-left, .panel-right {
+      border: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-center { border-bottom: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+
+<div class="preview-grid">
+
+  <!-- HEADER -->
+  <header class="site-header">
+    <div class="wordmark">
+      <!-- Lemon slice logo -->
+      <svg width="24" height="24" viewBox="0 0 24 24" class="lemon-glow">
+        <circle cx="12" cy="12" r="11" fill="#1A1800" stroke="#2E2B00" stroke-width="1"/>
+        <circle cx="12" cy="12" r="2.5" fill="#F5E642"/>
+        <path class="ls-seg" d="M12 9.5 L12 2 A10 10 0 0 1 18.5 5.5 Z" fill="#F5E642"/>
+        <path class="ls-seg" d="M12 9.5 L18.5 5.5 A10 10 0 0 1 22 12 Z" fill="#F5E642"/>
+        <path class="ls-seg" d="M12 14.5 L22 12 A10 10 0 0 1 18.5 18.5 Z" fill="#F5E642"/>
+        <path class="ls-seg" d="M12 14.5 L18.5 18.5 A10 10 0 0 1 12 22 Z" fill="#F5E642"/>
+        <path class="ls-seg" d="M12 14.5 L12 22 A10 10 0 0 1 5.5 18.5 Z" fill="#F5E642"/>
+        <path class="ls-seg" d="M12 14.5 L5.5 18.5 A10 10 0 0 1 2 12 Z" fill="#F5E642"/>
+        <path class="ls-seg" d="M12 9.5 L2 12 A10 10 0 0 1 5.5 5.5 Z" fill="#F5E642"/>
+        <path class="ls-seg" d="M12 9.5 L5.5 5.5 A10 10 0 0 1 12 2 Z" fill="#F5E642"/>
+      </svg>
+      Sublemonable
+    </div>
+    <nav class="header-nav">
+      <a>Security</a>
+      <a>Download</a>
+      <a>GitHub</a>
+      <a>Self-host</a>
+    </nav>
+    <button class="header-cta">Get the app</button>
+  </header>
+
+  <!-- LEFT: MARKETING HERO -->
+  <section class="panel-left">
+    <div class="hero-tag">Encrypted messaging</div>
+    <h1 class="hero-headline">Nothing<br><span class="accent">lasts.</span></h1>
+    <p class="hero-sub">That's the point.</p>
+    <p class="hero-body">
+      End-to-end encrypted messages that disappear. No logs. No screenshots. No phone number required. We can't read your messages — and neither can anyone else.
+    </p>
+    <div class="cta-row">
+      <button class="btn-primary">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M8 2v9M4 8l4 4 4-4"/>
+          <path d="M2 13h12"/>
+        </svg>
+        Download
+      </button>
+      <button class="btn-ghost">How it works →</button>
+    </div>
+    <div class="feature-pills">
+      <div class="pill"><div class="pill-dot"></div>Signal Protocol E2EE</div>
+      <div class="pill"><div class="pill-dot orange"></div>Burn-on-read</div>
+      <div class="pill"><div class="pill-dot green"></div>Zero server logs</div>
+      <div class="pill"><div class="pill-dot"></div>No phone number</div>
+      <div class="pill"><div class="pill-dot orange"></div>Screenshot blocked</div>
+      <div class="pill"><div class="pill-dot green"></div>Open source</div>
+      <div class="pill"><div class="pill-dot"></div>Tor-compatible</div>
+    </div>
+  </section>
+
+  <!-- CENTER: PHONE MOCKUP -->
+  <section class="panel-center">
+    <div class="phone-frame">
+      <div class="phone-notch">
+        <div class="notch-cam"></div>
+      </div>
+      <div class="chat-header">
+        <span class="back-btn">‹</span>
+        <div class="avatar">AJ</div>
+        <div class="chat-meta">
+          <div class="chat-name">Alex J.</div>
+          <div class="chat-status">Keys verified</div>
+        </div>
+        <span class="e2ee-badge">🔒 E2EE</span>
+      </div>
+      <div class="message-list" id="msgList">
+        <div class="date-divider">TODAY · 14:22</div>
+        <div class="msg received" style="animation-delay:0ms">
+          <div class="bubble">Hey, is this thing actually secure?</div>
+          <div class="msg-meta">14:22</div>
+        </div>
+        <div class="msg sent" style="animation-delay:100ms">
+          <div class="bubble">Completely. Signal Protocol. Our server has zero idea what we're saying.</div>
+          <div class="msg-meta">14:23 · ✓✓</div>
+        </div>
+        <div class="msg received" style="animation-delay:200ms">
+          <div class="bubble">What about screenshots?</div>
+          <div class="msg-meta">14:23</div>
+        </div>
+        <div class="msg sent" style="animation-delay:300ms">
+          <div class="bubble">
+            Android blocks them at the OS. iOS blurs instantly. Browser blurs too.
+          </div>
+          <div class="msg-meta">14:24 · ✓✓</div>
+        </div>
+        <div class="msg received" style="animation-delay:400ms" id="burnMsg">
+          <div class="bubble" style="position:relative">
+            🔥 This message burns in 10s
+            <svg class="bubble-timer" width="20" height="20" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="8" fill="none" stroke="#2E2B00" stroke-width="2"/>
+              <circle cx="10" cy="10" r="8" fill="none" stroke="#FF8C00" stroke-width="2"
+                stroke-dasharray="50.3" stroke-dashoffset="0" stroke-linecap="round"
+                id="timerArc" style="transform:rotate(-90deg);transform-origin:center;transition:stroke-dashoffset 10s linear"/>
+            </svg>
+          </div>
+          <div class="msg-meta"><span class="burn-indicator">🔥 30s</span></div>
+          <span class="burn-trigger" onclick="burnMessage()">[ tap to burn now ]</span>
+        </div>
+        <div class="msg sent" style="animation-delay:500ms">
+          <div class="bubble">Exactly. Read it and it's gone.</div>
+          <div class="msg-meta">14:25 · ✓✓</div>
+        </div>
+      </div>
+      <div class="compose-bar">
+        <button class="attach-btn">＋</button>
+        <input class="compose-input" placeholder="Send encrypted message…" id="composeInput">
+        <button class="send-btn" onclick="sendMsg()">
+          <svg class="send-icon" viewBox="0 0 16 16">
+            <line x1="14" y1="2" x2="2" y2="8"/>
+            <line x1="14" y1="2" x2="8" y2="14"/>
+            <line x1="2" y1="8" x2="8" y2="14"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: DESIGN TOKENS -->
+  <section class="panel-right">
+
+    <div class="section-label">Signature — The Lemon Slice</div>
+    <div class="lemon-showcase">
+      <!-- Full / Logo -->
+      <div class="slice-wrap">
+        <svg width="48" height="48" viewBox="0 0 24 24" class="animated-slice lemon-glow">
+          <circle cx="12" cy="12" r="11" fill="#1A1800" stroke="#2E2B00" stroke-width="1"/>
+          <circle cx="12" cy="12" r="2.5" fill="#F5E642"/>
+          <path class="ls-seg" d="M12 9.5 L12 2 A10 10 0 0 1 18.5 5.5 Z"/>
+          <path class="ls-seg" d="M12 9.5 L18.5 5.5 A10 10 0 0 1 22 12 Z"/>
+          <path class="ls-seg" d="M12 14.5 L22 12 A10 10 0 0 1 18.5 18.5 Z"/>
+          <path class="ls-seg" d="M12 14.5 L18.5 18.5 A10 10 0 0 1 12 22 Z"/>
+          <path class="ls-seg" d="M12 14.5 L12 22 A10 10 0 0 1 5.5 18.5 Z"/>
+          <path class="ls-seg" d="M12 14.5 L5.5 18.5 A10 10 0 0 1 2 12 Z"/>
+          <path class="ls-seg" d="M12 9.5 L2 12 A10 10 0 0 1 5.5 5.5 Z"/>
+          <path class="ls-seg" d="M12 9.5 L5.5 5.5 A10 10 0 0 1 12 2 Z"/>
+        </svg>
+        <div class="lemon-label">Logo</div>
+      </div>
+      <!-- Spinner -->
+      <div class="slice-wrap">
+        <svg width="36" height="36" viewBox="0 0 24 24" class="spinning">
+          <circle cx="12" cy="12" r="11" fill="#1A1800" stroke="#2E2B00" stroke-width="1"/>
+          <circle cx="12" cy="12" r="2.5" fill="#F5E642"/>
+          <path d="M12 9.5 L12 2 A10 10 0 0 1 18.5 5.5 Z" fill="#F5E642"/>
+          <path d="M12 9.5 L18.5 5.5 A10 10 0 0 1 22 12 Z" fill="#2E2B00"/>
+          <path d="M12 14.5 L22 12 A10 10 0 0 1 18.5 18.5 Z" fill="#2E2B00"/>
+          <path d="M12 14.5 L18.5 18.5 A10 10 0 0 1 12 22 Z" fill="#2E2B00"/>
+          <path d="M12 14.5 L12 22 A10 10 0 0 1 5.5 18.5 Z" fill="#2E2B00"/>
+          <path d="M12 14.5 L5.5 18.5 A10 10 0 0 1 2 12 Z" fill="#2E2B00"/>
+          <path d="M12 9.5 L2 12 A10 10 0 0 1 5.5 5.5 Z" fill="#2E2B00"/>
+          <path d="M12 9.5 L5.5 5.5 A10 10 0 0 1 12 2 Z" fill="#2E2B00"/>
+        </svg>
+        <div class="lemon-label">Loader</div>
+      </div>
+      <!-- Burn timer (4/8) -->
+      <div class="slice-wrap">
+        <svg width="36" height="36" viewBox="0 0 24 24" class="burn-slice">
+          <circle cx="12" cy="12" r="11" fill="#1A1800" stroke="#2E2B00" stroke-width="1"/>
+          <circle cx="12" cy="12" r="2.5" fill="#FF4444"/>
+          <path class="ls-seg" d="M12 9.5 L12 2 A10 10 0 0 1 18.5 5.5 Z"/>
+          <path class="ls-seg" d="M12 9.5 L18.5 5.5 A10 10 0 0 1 22 12 Z"/>
+          <path class="ls-seg" d="M12 14.5 L22 12 A10 10 0 0 1 18.5 18.5 Z"/>
+          <path class="ls-seg" d="M12 14.5 L18.5 18.5 A10 10 0 0 1 12 22 Z"/>
+          <path class="ls-seg" d="M12 14.5 L12 22 A10 10 0 0 1 5.5 18.5 Z"/>
+          <path class="ls-seg" d="M12 14.5 L5.5 18.5 A10 10 0 0 1 2 12 Z"/>
+          <path class="ls-seg" d="M12 9.5 L2 12 A10 10 0 0 1 5.5 5.5 Z"/>
+          <path class="ls-seg" d="M12 9.5 L5.5 5.5 A10 10 0 0 1 12 2 Z"/>
+        </svg>
+        <div class="lemon-label">Timer 4/8</div>
+      </div>
+      <!-- Verified -->
+      <div class="slice-wrap">
+        <svg width="36" height="36" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="11" fill="#1A1800" stroke="rgba(74,222,128,0.4)" stroke-width="1.5"/>
+          <circle cx="12" cy="12" r="2.5" fill="#4ADE80"/>
+          <path d="M12 9.5 L12 2 A10 10 0 0 1 18.5 5.5 Z" fill="#4ADE80" opacity="0.8"/>
+          <path d="M12 9.5 L18.5 5.5 A10 10 0 0 1 22 12 Z" fill="#4ADE80" opacity="0.8"/>
+          <path d="M12 14.5 L22 12 A10 10 0 0 1 18.5 18.5 Z" fill="#4ADE80" opacity="0.8"/>
+          <path d="M12 14.5 L18.5 18.5 A10 10 0 0 1 12 22 Z" fill="#4ADE80" opacity="0.8"/>
+          <path d="M12 14.5 L12 22 A10 10 0 0 1 5.5 18.5 Z" fill="#4ADE80" opacity="0.8"/>
+          <path d="M12 14.5 L5.5 18.5 A10 10 0 0 1 2 12 Z" fill="#4ADE80" opacity="0.8"/>
+          <path d="M12 9.5 L2 12 A10 10 0 0 1 5.5 5.5 Z" fill="#4ADE80" opacity="0.8"/>
+          <path d="M12 9.5 L5.5 5.5 A10 10 0 0 1 12 2 Z" fill="#4ADE80" opacity="0.8"/>
+        </svg>
+        <div class="lemon-label">Verified</div>
+      </div>
+    </div>
+
+    <div class="section-label">Color Palette</div>
+    <div class="swatch-grid">
+      <div>
+        <div class="swatch" style="background:#F5E642; box-shadow: 0 0 12px rgba(245,230,66,0.4)"></div>
+        <div class="swatch-label">#F5E642<br>lemon</div>
+      </div>
+      <div>
+        <div class="swatch" style="background:#0D0C00"></div>
+        <div class="swatch-label">#0D0C00<br>bg</div>
+      </div>
+      <div>
+        <div class="swatch" style="background:#242100; border: 1px solid #2E2B00"></div>
+        <div class="swatch-label">#242100<br>elevated</div>
+      </div>
+      <div>
+        <div class="swatch" style="background:#4ADE80"></div>
+        <div class="swatch-label">#4ADE80<br>verified</div>
+      </div>
+      <div>
+        <div class="swatch" style="background:#FF8C00"></div>
+        <div class="swatch-label">#FF8C00<br>burn</div>
+      </div>
+      <div>
+        <div class="swatch" style="background:#FF4444"></div>
+        <div class="swatch-label">#FF4444<br>destroy</div>
+      </div>
+      <div>
+        <div class="swatch" style="background:#A8A070"></div>
+        <div class="swatch-label">#A8A070<br>secondary</div>
+      </div>
+      <div>
+        <div class="swatch" style="background:#FAFAF2"></div>
+        <div class="swatch-label">#FAFAF2<br>text</div>
+      </div>
+    </div>
+
+    <div class="section-label">Typography</div>
+    <div class="type-specimen">
+      <div class="specimen-label">DISPLAY · Inter 700 · −0.03em</div>
+      <div class="specimen-display">Sublemonable</div>
+      <div class="specimen-body">Messages that disappear. That's the point.</div>
+      <div class="specimen-mono">A1B2·C3D4·E5F6·G7H8·I9J0·K1L2</div>
+    </div>
+
+    <div class="section-label">Screenshot Protection</div>
+    <div class="blur-demo-wrap">
+      <div class="blur-demo-inner">
+        <div style="font-size:0.75rem; color: var(--text-secondary); margin-bottom: 6px; font-family: var(--font-mono);">Private message content</div>
+        <div style="font-size:0.8125rem; color: var(--text-primary);">Hey, the package arrived. Check the drop.</div>
+      </div>
+      <div class="blur-demo-overlay">SCREENSHOT DETECTED · BLURRED</div>
+    </div>
+    <div style="font-size:0.625rem; color: var(--text-muted); font-family: var(--font-mono); margin-top: 6px;">↑ Hover to simulate screenshot blur</div>
+
+    <div class="section-label">Components</div>
+    <div class="component-demo">
+      <div style="font-size:0.625rem; font-family:var(--font-mono); color:var(--text-muted); margin-bottom:8px">KEY FINGERPRINT</div>
+      <div class="fingerprint">
+        <span>A1B2</span> C3D4 E5F6 <span>G7H8</span><br>
+        I9J0 <span>K1L2</span> M3N4 O5P6<br>
+        <span>Q7R8</span> S9T0 U1V2 <span>W3X4</span>
+      </div>
+    </div>
+
+    <div class="component-demo" style="display:flex; align-items:center; gap:12px;">
+      <div class="security-badge-demo">
+        <svg width="12" height="12" viewBox="0 0 12 12">
+          <circle cx="6" cy="6" r="5.5" fill="none" stroke="#4ADE80" stroke-width="1"/>
+          <path d="M3.5 6l2 2 3-3" fill="none" stroke="#4ADE80" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Keys verified
+      </div>
+      <div style="font-size:0.75rem; color: var(--text-muted);">Safety number matched</div>
+    </div>
+
+    <div class="component-demo">
+      <div class="notif-demo">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#0D0C00" stroke-width="1.8" stroke-linecap="round">
+          <path d="M8 1.5a5 5 0 0 1 5 5v3l1.5 2H1.5L3 9.5v-3a5 5 0 0 1 5-5Z"/>
+          <path d="M6.5 13a1.5 1.5 0 0 0 3 0"/>
+        </svg>
+        New message — Sublemonable
+      </div>
+      <div style="font-size:0.625rem; color:var(--text-muted); font-family:var(--font-mono); margin-top:6px">Content never shown in notification</div>
+    </div>
+
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+    <div class="wordmark" style="font-size:0.875rem">
+      <svg width="18" height="18" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="11" fill="#1A1800" stroke="#2E2B00" stroke-width="1"/>
+        <circle cx="12" cy="12" r="2.5" fill="#F5E642"/>
+        <path d="M12 9.5 L12 2 A10 10 0 0 1 18.5 5.5 Z" fill="#F5E642"/>
+        <path d="M12 9.5 L18.5 5.5 A10 10 0 0 1 22 12 Z" fill="#F5E642"/>
+        <path d="M12 14.5 L22 12 A10 10 0 0 1 18.5 18.5 Z" fill="#F5E642"/>
+        <path d="M12 14.5 L18.5 18.5 A10 10 0 0 1 12 22 Z" fill="#F5E642"/>
+        <path d="M12 14.5 L12 22 A10 10 0 0 1 5.5 18.5 Z" fill="#F5E642"/>
+        <path d="M12 14.5 L5.5 18.5 A10 10 0 0 1 2 12 Z" fill="#F5E642"/>
+        <path d="M12 9.5 L2 12 A10 10 0 0 1 5.5 5.5 Z" fill="#F5E642"/>
+        <path d="M12 9.5 L5.5 5.5 A10 10 0 0 1 12 2 Z" fill="#F5E642"/>
+      </svg>
+      Sublemonable
+    </div>
+    <div>sublemonable.com · Nothing lasts. That's the point.</div>
+    <div style="display:flex; gap:20px; font-size:0.75rem;">
+      <span style="cursor:pointer; color:var(--lemon)">Security</span>
+      <span style="cursor:pointer">GitHub</span>
+      <span style="cursor:pointer">Privacy</span>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  // Start burn timer arc animation
+  setTimeout(() => {
+    const arc = document.getElementById('timerArc');
+    if (arc) {
+      arc.style.strokeDashoffset = '50.3';
+    }
+  }, 100);
+
+  // Send message demo
+  function sendMsg() {
+    const input = document.getElementById('composeInput');
+    const text = input.value.trim();
+    if (!text) return;
+    const list = document.getElementById('msgList');
+    const msg = document.createElement('div');
+    msg.className = 'msg sent';
+    msg.innerHTML = `<div class="bubble">${text}</div><div class="msg-meta">now · ✓</div>`;
+    list.appendChild(msg);
+    input.value = '';
+    list.scrollTop = list.scrollHeight;
+  }
+
+  document.getElementById('composeInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendMsg();
+  });
+
+  // Burn message demo
+  function burnMessage() {
+    const msg = document.getElementById('burnMsg');
+    if (!msg) return;
+    msg.classList.add('burning');
+    setTimeout(() => {
+      const ash = document.createElement('div');
+      ash.style.cssText = 'text-align:center; font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono); padding: 4px 0; animation: msgIn 300ms ease both;';
+      ash.textContent = '🔥 Message destroyed';
+      msg.replaceWith(ash);
+    }, 650);
+  }
+</script>
+</body>
+</html>

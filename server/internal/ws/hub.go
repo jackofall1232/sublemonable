@@ -131,7 +131,7 @@ func (h *Hub) handleEvent(c *Client, raw []byte) {
 		h.handleAck(c, ev)
 	case "message.burn":
 		h.relayToPeer(c, ev, "message.burned")
-	case "typing.start", "typing.stop", "presence.update":
+	case "typing.start", "typing.stop", "presence.update", "contact.info":
 		h.relaySignal(c, ev)
 	default:
 		c.send(serverEvent{Type: "error", Code: "unknown_event"})

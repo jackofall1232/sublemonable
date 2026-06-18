@@ -34,6 +34,10 @@ apps/android/.idea/
 .env.*
 !.env.example
 
+# Desktop (Tauri)
+apps/desktop/src-tauri/target/
+apps/desktop/gen/
+
 # OS / editor
 .DS_Store
 *.swp

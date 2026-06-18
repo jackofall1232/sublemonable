@@ -71,6 +71,17 @@ func main() {
 	v1.Get("/prekeys/count", handlers.RequireAuth, handlers.PrekeyCount)
 	v1.Delete("/account", handlers.RequireAuth, handlers.DeleteAccount)
 
+	// Dead drops (v1.5) — anonymous, unauthenticated. Proof-of-work on deposit
+	// stands in for auth; redemption is gated only by the one-time token.
+	v1.Post("/drops", handlers.DepositDrop)
+	v1.Post("/drops/redeem", handlers.RedeemDrop)
+
+	// Multi-hop relay forwarding (v1.5). Served only when this deployment is
+	// configured as a relay node (RELAY_PRIVATE_KEY set).
+	if handlers.RelayEnabled() {
+		app.Post("/relay/forward", handlers.RelayForward)
+	}
+
 	// Authenticated WebSocket for real-time delivery. The token rides the
 	// Sec-WebSocket-Protocol header (browser WebSocket API can't set
 	// Authorization), or a query param as a fallback for native clients.

@@ -16,11 +16,7 @@ import {
 } from "./keys.js";
 import { decryptKeyStore, encryptKeyStore, type KeyStore } from "./keystore.js";
 import { ratchetDecrypt, ratchetEncrypt } from "./ratchet.js";
-import {
-  decodeWatermarkPayload,
-  embedWatermarkBits,
-  extractWatermarkBits,
-} from "./watermark.js";
+import { decodeWatermarkPayload, embedWatermarkBits, extractWatermarkBits } from "./watermark.js";
 import { x3dhInitiate, x3dhRespond } from "./x3dh.js";
 
 async function establishedSessions() {

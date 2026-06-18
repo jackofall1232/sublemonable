@@ -60,7 +60,9 @@ export function MessageBubble({
           fontSize: "0.9375rem",
           fontFamily: typography.body.family,
           lineHeight: 1.45,
-          background: sent ? color.semantic.backgroundMessageSent : color.semantic.backgroundMessageReceived,
+          background: sent
+            ? color.semantic.backgroundMessageSent
+            : color.semantic.backgroundMessageReceived,
           color: sent ? color.semantic.textOnLemon : color.semantic.textPrimary,
           border: sent ? "none" : `1px solid ${color.semantic.border}`,
           borderRadius: sent ? radius.bubbleSent : radius.bubbleReceived,
