@@ -49,7 +49,104 @@ Two options:
 2. **Direct:** set `TLS_CERT_PATH`/`TLS_KEY_PATH` and expose the port directly.
 
 Either way, clients require TLS 1.3 and ship with certificate pinning — when you self-host, build
-mobile clients with **your** certificate's SPKI hash.
+the clients with **your** certificate's SPKI hash (see [Certificate pinning](#certificate-pinning)).
+
+### Caddy reverse proxy (recommended)
+
+Caddy gets you automatic Let's Encrypt TLS and transparent WebSocket proxying. Point your
+domain's DNS at the box, open ports 80 + 443, and use this `Caddyfile`:
+
+```caddy
+relay.example.com {
+    # Reuse the leaf private key across renewals so the pinned SPKI hash never
+    # changes — clients can pin one durable value (see Certificate pinning).
+    tls {
+        reuse_private_keys
+    }
+    # Caddy v2 proxies the /ws WebSocket upgrade transparently; no extra config.
+    reverse_proxy localhost:8443
+}
+```
+
+Leave `TLS_CERT_PATH`/`TLS_KEY_PATH` empty in `.env` — the Go server then runs plain HTTP on
+`8443` behind Caddy, which terminates TLS. Verify with `curl -I https://relay.example.com/api/v1/register`
+(expect a response, not a connection error) and confirm a real cert: `curl` should succeed
+without `-k`.
+
+> **Use a strong `POSTGRES_PASSWORD`.** `docker-compose.yml` defaults it to `sub`; set it in `.env`.
+
+## Certificate pinning
+
+The clients validate the normal CA chain **and** pin your server's leaf SubjectPublicKeyInfo
+(SPKI) hash, so a mis-issued or MITM certificate is rejected even if it chains to a trusted CA.
+When you self-host you must put **your** pin into the clients before building them.
+
+### Compute your pin
+
+```bash
+openssl s_client -connect relay.example.com:443 -servername relay.example.com < /dev/null 2>/dev/null \
+  | openssl x509 -pubkey -noout \
+  | openssl pkey -pubin -outform DER \
+  | openssl dgst -sha256 -binary | base64
+# -> use as  sha256/<that base64>
+```
+
+Generate a second, **offline** backup key pair and pin it too — pinning with no backup means
+losing the key bricks every client until you ship an app update:
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout -out backup-pin-key.pem   # keep OFFLINE
+openssl pkey -in backup-pin-key.pem -pubout -outform DER \
+  | openssl dgst -sha256 -binary | base64
+```
+
+### Where the pins live
+
+Set the **same** primary + backup pins (and your host) in every client:
+
+| Client | File | What to set |
+| --- | --- | --- |
+| iOS | `apps/ios/Sources/Networking/PinnedSessionDelegate.swift` | `pinnedSPKISHA256` set; `APIClient.defaultBaseURL` + `WebSocketClient.defaultURL` |
+| Android | `apps/android/.../net/CertificatePinning.kt` | `API_HOST`, `PRIMARY_PIN`, `BACKUP_PIN`; URLs in `SublemonableApp.kt` |
+| Desktop | `apps/desktop/src-tauri/src/pinning.rs` | `API_HOST`, `PRIMARY_PIN`, `BACKUP_PIN` |
+
+The pin host **must** match the URL the client connects to, or the pin won't apply.
+
+### Desktop (Tauri) pinned transport
+
+The desktop UI is the `apps/web` bundle in a WebView, which can't pin TLS itself. The native
+Tauri layer (`apps/desktop/src-tauri/src/transport.rs`) therefore routes all REST and WebSocket
+traffic through a rustls client that enforces the pins in `pinning.rs`; `apps/web` automatically
+uses it when running under Tauri (and plain `fetch`/`WebSocket` in the browser). Build the desktop
+bundle with the server URL baked in so it targets your pinned host:
+
+```bash
+VITE_SERVER_URL=https://relay.example.com pnpm --filter @sublemonable/web build
+cd apps/desktop && pnpm tauri build
+```
+
+Validate the native transport before trusting it:
+
+```bash
+cd apps/desktop/src-tauri && cargo test transport   # pin/verifier unit tests
+```
+
+The verifier is **fail-closed**: a connection is accepted only when the CA chain validates AND the
+leaf SPKI matches a configured pin.
+
+### Rotating keys / pins without locking users out
+
+SPKI pinning is "reject anything not pinned", so order matters:
+
+1. Clients already trust **primary + backup** pins (do this from day one).
+2. To rotate: point the server at your offline backup key (the one whose pin clients already
+   trust). With Caddy that means installing the new key; clients keep connecting because the
+   backup pin still matches.
+3. Generate a fresh backup key, add its pin alongside the now-active one, and **ship a client
+   update**. Only after that update is widely adopted, drop the retired pin.
+
+Never remove a pin that the currently-served certificate depends on, and never ship a build with
+a single pin and no backup.
 
 ## Optional Tor hidden service
 
@@ -78,6 +175,8 @@ There is intentionally little to back up — delivered messages are already gone
   `docker compose exec postgres pg_dump -U sub sublemonable > backup.sql`
 - Your JWT signing keys (`server/keys/`) — losing them logs every client out
 - Your Tor hidden service keys (`tor-data` volume) — losing them changes your .onion address
+- Your offline certificate backup key (`backup-pin-key.pem`) — store it **off the server**; it is
+  the only way to rotate to a pin clients already trust without shipping an app update first
 
 Do **not** back up to anywhere that weakens your users' threat model; the database contains
 undelivered (encrypted) envelopes.

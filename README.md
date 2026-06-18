@@ -34,6 +34,9 @@ attribution.
 - **Store-and-forward only** — messages purged from the server immediately on delivery acknowledgement
 - **No metadata hoarding** — no IP logging, no contact lists, no device identifiers stored
 - **Argon2id** key derivation for all passphrases; hardware-backed key storage on mobile
+- **TLS 1.3 + certificate pinning** — every client pins the server's leaf public-key (SPKI) hash and
+  fails closed on a mismatch, so a mis-issued or MITM certificate is rejected even if it chains to a
+  trusted CA (enforced natively on desktop, where the WebView cannot pin)
 
 Full details in [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
 
@@ -45,6 +48,7 @@ Full details in [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
 - 📵 Screenshot protection — hard block on Android, instant blur on iOS and browser
 - 🫥 Invisible watermarking for leak attribution
 - 🪪 No phone number, email, or name required
+- 📌 TLS 1.3 with certificate pinning on every client — fail-closed against MITM, even on the desktop WebView
 - 🖥️ Native Linux desktop app — .deb, .AppImage, .rpm — with libsecret key storage and focus-loss screenshot blur
 
 ### v1.5 — the security onion
