@@ -41,6 +41,24 @@ dirs = "5"
 # Zero secret bytes on drop.
 zeroize = { version = "1", features = ["derive"] }
 
+# ── Certificate-pinned transport (src/transport.rs) ──────────────────────────
+# The WebView can't pin TLS, so REST + WebSocket traffic is routed through a
+# native rustls client with a custom SPKI-pinning verifier. Versions are chosen
+# to share a single rustls 0.23 graph across reqwest and tokio-tungstenite.
+# `default-features = false` on rustls keeps the crypto backend on `ring`
+# (no aws-lc-rs / C toolchain requirement). reqwest is already in the lockfile
+# transitively without a TLS backend; declaring it here adds rustls + the
+# `use_preconfigured_tls` entry point.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+webpki-roots = "0.26"
+x509-parser = "0.16"
+futures-util = "0.3"
+sha2 = "0.10"
+base64 = "0.22"
+url = "2"
+
 [profile.release]
 # Smaller, harder-to-reverse release binary; strip symbols.
 panic = "abort"

@@ -20,30 +20,33 @@ import java.util.concurrent.TimeUnit
  */
 object CertificatePinning {
 
-    /** Host the pin applies to. Self-hosters: set this to your domain. */
-    const val API_HOST = "api.sublemonable.com"
+    /** Host the pin applies to. Must match API_BASE_URL/WS_URL in SublemonableApp. */
+    const val API_HOST = "relay.sublemonable.com"
 
     /**
      * ╔══════════════════════════════════════════════════════════════════╗
-     * ║ SELF-HOSTERS: REPLACE THIS PIN.                                  ║
+     * ║ Deployment: relay.sublemonable.com                              ║
      * ║                                                                  ║
-     * ║ This is a PLACEHOLDER (all zero bytes) and will reject every     ║
-     * ║ real certificate — the app intentionally cannot connect until    ║
-     * ║ you pin your own server's key. Compute the real value with:     ║
+     * ║ SPKI pins (SHA-256 of the leaf SubjectPublicKeyInfo). PRIMARY is ║
+     * ║ the live Let's Encrypt leaf; Caddy reuses its private key across ║
+     * ║ renewals (reuse_private_keys) so the pin stays stable. BACKUP is ║
+     * ║ an offline-held spare key — swap the server to it and the app    ║
+     * ║ keeps connecting without an update. Keep BOTH; drop the old one  ║
+     * ║ only after shipping an update that rotated to a new pair.        ║
      * ║                                                                  ║
-     * ║   openssl s_client -connect your.host:443 < /dev/null \         ║
-     * ║     | openssl x509 -pubkey -noout \                             ║
+     * ║ Re-derive with:                                                  ║
+     * ║   openssl s_client -connect relay.sublemonable.com:443 \        ║
+     * ║     < /dev/null | openssl x509 -pubkey -noout \                 ║
      * ║     | openssl pkey -pubin -outform DER \                        ║
      * ║     | openssl dgst -sha256 -binary | base64                     ║
      * ║                                                                  ║
-     * ║ Pin the leaf AND a backup (intermediate or future key) so a     ║
-     * ║ routine certificate rotation cannot brick the app.              ║
+     * ║ These MUST match the iOS client's PinnedSessionDelegate.swift.  ║
      * ╚══════════════════════════════════════════════════════════════════╝
      */
-    const val PRIMARY_PIN = "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    const val PRIMARY_PIN = "sha256/TZbasNP1niaVV0fEtpn2QbjY1QiIS8R7w4zhaU5Yw3U="
 
-    /** Backup pin — replace alongside [PRIMARY_PIN]. */
-    const val BACKUP_PIN = "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    /** Backup pin — offline-held spare key. Replace alongside [PRIMARY_PIN]. */
+    const val BACKUP_PIN = "sha256/BoqfuAlHFGnQJiL9nv7n7lAnRMixTWhpCWCs8v1eepM="
 
     private val pinner: CertificatePinner = CertificatePinner.Builder()
         .add(API_HOST, PRIMARY_PIN)

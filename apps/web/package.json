@@ -14,6 +14,7 @@
     "lint": "prettier --check src"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2",
     "@sublemonable/crypto": "workspace:*",
     "@sublemonable/protocol": "workspace:*",
     "@sublemonable/relay-client": "workspace:*",

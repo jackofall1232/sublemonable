@@ -15,22 +15,26 @@ import CryptoKit
 /// key pair; pinning narrows trust, it never widens it.
 public enum CertificatePin {
     // =========================================================================
-    // SELF-HOSTERS: REPLACE THIS PIN.
+    // Deployment: relay.sublemonable.com
     //
-    // This is a PLACEHOLDER value and will reject every real server. Compute
-    // the SPKI pin for your deployment's certificate with:
+    // SPKI pins (SHA-256 over the leaf certificate's SubjectPublicKeyInfo). The
+    // primary is the live Let's Encrypt leaf; Caddy reuses its private key across
+    // renewals (tls { reuse_private_keys }), so this value stays stable through
+    // renewal. The backup is an offline-held spare key — point the server at it
+    // and the app keeps trusting it without an app update. Keep BOTH pins; drop
+    // the old one only after shipping an update that has rotated to a new pair.
     //
-    //   openssl s_client -connect your.server:443 < /dev/null 2>/dev/null \
+    // Re-derive a pin with:
+    //   openssl s_client -connect relay.sublemonable.com:443 < /dev/null 2>/dev/null \
     //     | openssl x509 -pubkey -noout \
     //     | openssl pkey -pubin -outform DER \
     //     | openssl dgst -sha256 -binary | base64
     //
-    // Use the identical value in the Android client's CertificatePinning.kt.
-    // Add your backup key's pin as a second entry before rotating key pairs,
-    // ship an update, then remove the old pin.
+    // These MUST match the Android client's CertificatePinning.kt.
     // =========================================================================
     public static let pinnedSPKISHA256: Set<String> = [
-        "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" // PLACEHOLDER — replace before deploying
+        "sha256/TZbasNP1niaVV0fEtpn2QbjY1QiIS8R7w4zhaU5Yw3U=", // primary — live leaf key
+        "sha256/BoqfuAlHFGnQJiL9nv7n7lAnRMixTWhpCWCs8v1eepM="  // backup — offline spare key
     ]
 
     /// Evaluates a server trust object: full system chain validation first,

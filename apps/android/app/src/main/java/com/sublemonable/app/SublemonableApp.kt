@@ -100,7 +100,7 @@ class AppContainer(private val app: Application) {
     companion object {
         // Self-hosters: point these at your deployment AND replace the
         // certificate pin in net/CertificatePinning.kt.
-        const val API_BASE_URL = "https://api.sublemonable.com"
-        const val WS_URL = "wss://api.sublemonable.com/ws"
+        const val API_BASE_URL = "https://relay.sublemonable.com"
+        const val WS_URL = "wss://relay.sublemonable.com/ws"
     }
 }
