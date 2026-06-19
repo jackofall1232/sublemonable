@@ -38,6 +38,9 @@ android {
     }
 
     compileOptions {
+        // Required by org.signal:libsignal-android, which uses APIs that must be
+        // desugared to run on minSdk 26.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -62,6 +65,9 @@ android {
 }
 
 dependencies {
+    // Core library desugaring runtime (required by libsignal-android).
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -88,6 +94,10 @@ dependencies {
     // Encrypted local storage + biometrics
     implementation(libs.androidx.security.crypto)
     implementation(libs.androidx.biometric)
+    // biometric 1.1.0 pulls fragment 1.2.5, which predates ActivityResult support
+    // for FragmentActivity; pin a current fragment so registerForActivityResult
+    // works correctly (and satisfies lintVitalRelease).
+    implementation(libs.androidx.fragment)
 
     // QR codes for key verification (pure-Java, offline)
     implementation(libs.zxing.core)

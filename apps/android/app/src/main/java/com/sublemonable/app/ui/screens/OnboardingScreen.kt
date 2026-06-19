@@ -3,6 +3,10 @@
 // See the LICENSE file in the repository root for full license text.
 // SPDX-License-Identifier: AGPL-3.0-only
 
+// The onboarding pager uses Compose Foundation's Pager APIs, which are still
+// marked experimental in this Compose version; opt in for the whole file.
+@file:OptIn(ExperimentalFoundationApi::class)
+
 package com.sublemonable.app.ui.screens
 
 import androidx.compose.animation.core.LinearEasing
@@ -11,6 +15,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
