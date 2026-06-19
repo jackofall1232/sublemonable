@@ -19,5 +19,5 @@ export const GITHUB_ISSUES = `${GITHUB_URL}/issues`;
 export const ANDROID_BETA_VERSION = "v1.0.0-beta";
 export const ANDROID_BETA_APK_URL = `${GITHUB_URL}/releases/download/${ANDROID_BETA_VERSION}/sublemonable-${ANDROID_BETA_VERSION}.apk`;
 // 64 hex chars once filled in; the page shows a "pending" note until then.
-export const ANDROID_BETA_SHA256 = "";
+export const ANDROID_BETA_SHA256 = "3091c7ae1c88a02fd5bf79033125b23148477c7800392e90a64939e20d2ded10";
 export const ANDROID_BETA_MIN_OS = "Android 8.0 (Oreo)";
