@@ -42,7 +42,9 @@ export class WsClient {
       this.onStatus("open");
       for (const ev of this.queue.splice(0)) this.send(ev);
     };
-    socket.onmessage = (msg) => {
+    // Annotated because `socket` is a union (browser WebSocket | NativeWsSocket)
+    // whose onmessage param types differ; without this the param infers `any`.
+    socket.onmessage = (msg: MessageEvent | { data: string }) => {
       try {
         this.onEvent(JSON.parse(msg.data as string) as ServerEvent);
       } catch {
