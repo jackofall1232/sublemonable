@@ -229,6 +229,34 @@ Tor is now the **default** transport; clearnet is a fallback shown with a visibl
 in-process (Guardian Project `Tor.framework` / `tor-android`) with no Orbot dependency; browser
 clients auto-detect an `.onion` host. Only v3 onion addresses are used.
 
+### Tor architecture (three hidden services)
+
+The server runs **three** separate Tor v3 hidden services on the same box, sharing one Go binary and
+one internal port and distinguished by the request `Host` header:
+
+- **Public download mirror** — published; serves the static no-JS APK mirror.
+- **Secret resilience mirror** — unpublished, word-of-mouth; identical mirror content, separate
+  `.onion`, so it survives a targeted takedown of the public address.
+- **Relay onion** — unpublished, baked into the app binary; serves the API only (no mirror), giving
+  clients anonymity when messaging.
+
+The honest anonymity claim is **client anonymity, not server anonymity**: the relay onion hides the
+*client's* IP from the server, but the server's Hetzner IP is publicly associated with the service
+via clearnet DNS. `HiddenServiceNonAnonymousMode` is never set, and no `Onion-Location` header is
+ever emitted (it would auto-advertise the secret mirror).
+
+The transport fallback chain is **Tor → I2P (future skeleton) → clearnet (last resort, warned)**. The
+user picks Tor-first or I2P-first; clearnet fallback can be disabled, in which case the app refuses to
+connect rather than going clearnet. Full detail, including the threat model and key backup, is in
+[`docs/TOR_ARCHITECTURE.md`](TOR_ARCHITECTURE.md).
+
+| Threat | Protected? | Notes |
+| --- | --- | --- |
+| Client IP exposed to relay | ✅ via Tor | Relay onion hides client IP from server |
+| Server location hidden | ❌ | Hetzner IP is public; this is honest and documented |
+| APK distribution takedown | Partial ✅ | Two mirrors (public + secret), more nodes planned |
+| Clearnet traffic analysis | ⚠️ Fallback only | Clearnet is last resort with explicit warning |
+
 ### Dead-drop mode
 
 Asynchronous, anonymous deposit with no direct channel between the two parties:

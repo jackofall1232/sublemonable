@@ -3,6 +3,8 @@
 // See the LICENSE file in the repository root for full license text.
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { DEFAULT_PREFERRED_TRANSPORT, type PreferredTransport } from "./transport.js";
+
 /**
  * Connection modes (v1.5). Three user-selectable profiles that compose the
  * network-layer features of the security onion. Each mode is a fixed bundle of
@@ -20,8 +22,15 @@ export type CoverTrafficIntensity = "off" | "low" | "medium" | "high";
 /** The platforms a client may run on. Tracked as session metadata only. */
 export type Platform = "ios" | "android" | "browser";
 
-/** Live transport state shown by the connection-mode badge. */
-export type TransportState = "tor" | "clearnet_fallback" | "offline";
+/**
+ * Live transport state shown by the connection-mode badge.
+ *
+ * "tor"               = connected via Tor hidden service (relay onion)
+ * "i2p"               = connected via I2P (skeleton — never emitted in v1.5)
+ * "clearnet_fallback" = connected via HTTPS/WSS clearnet; Tor and I2P unavailable
+ * "offline"           = no connection
+ */
+export type TransportState = "tor" | "i2p" | "clearnet_fallback" | "offline";
 
 export interface ConnectionModeConfig {
   mode: ConnectionMode;
@@ -92,3 +101,27 @@ export const DECOY_CADENCE_SECONDS: Record<CoverTrafficIntensity, [number, numbe
 export function connectionModeConfig(mode: ConnectionMode): ConnectionModeConfig {
   return CONNECTION_MODES[mode];
 }
+
+/**
+ * Persisted network settings shared across platforms (v1.5). The canonical shape
+ * each client mirrors into its own storage. Carries no key material and nothing
+ * that reveals vault count or existence.
+ */
+export interface PersistedNetworkSettings {
+  connectionMode: ConnectionMode;
+  coverTraffic: CoverTrafficIntensity;
+  /** Preferred anonymous transport — see ./transport.ts. */
+  preferredTransport: PreferredTransport;
+  /**
+   * When false, the transport resolver refuses to connect (returns "offline")
+   * rather than falling back to warned clearnet. Default true.
+   */
+  allowClearnetFallback: boolean;
+}
+
+export const DEFAULT_NETWORK_SETTINGS: PersistedNetworkSettings = {
+  connectionMode: DEFAULT_CONNECTION_MODE,
+  coverTraffic: CONNECTION_MODES[DEFAULT_CONNECTION_MODE].decoyIntensity,
+  preferredTransport: DEFAULT_PREFERRED_TRANSPORT,
+  allowClearnetFallback: true,
+};

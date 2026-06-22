@@ -1,7 +1,37 @@
 # Sublemonable Tor hidden service configuration
-# The hidden service forwards onion port 80 to the server container.
+#
+# Three separate v3 hidden services share one box and one internal port (8443).
+# The Go server distinguishes them by the request Host header
+# (see server/cmd/server/onion.go and docs/TOR_ARCHITECTURE.md):
+#
+#   public mirror  Host == PUBLIC_ONION_ADDRESS  -> static APK mirror
+#   secret mirror  Host == SECRET_ONION_ADDRESS  -> static APK mirror (same content)
+#   relay onion    Host == RELAY_ONION_ADDRESS   -> API only (no mirror)
+#
+# HiddenServiceNonAnonymousMode is deliberately NOT set: every service is a
+# normal, anonymous v3 hidden service.
 DataDirectory /var/lib/tor
-HiddenServiceDir /var/lib/tor/sublemonable
-HiddenServicePort 80 server:8443
-# Hidden services don't need an open SOCKS port
+# Hidden services don't need an open SOCKS port.
 SocksPort 0
+
+# --- 1. Public download mirror ---
+# .onion address published in docs and sublemonable.com.
+# Serves the static no-JS APK mirror (Host == PUBLIC_ONION_ADDRESS).
+HiddenServiceDir /var/lib/tor/sublemonable-mirror-public
+HiddenServicePort 80 server:8443
+
+# --- 2. Secret resilience mirror ---
+# .onion address NOT published anywhere — word-of-mouth only.
+# Serves the same APK mirror content (Host == SECRET_ONION_ADDRESS).
+# Separate address from public mirror: if public is targeted, secret survives.
+HiddenServiceDir /var/lib/tor/sublemonable-mirror-secret
+HiddenServicePort 80 server:8443
+
+# --- 3. Relay onion ---
+# NOT published anywhere. Address baked into app binary at build time.
+# Serves the API only (Host == RELAY_ONION_ADDRESS or no match -> API).
+# Provides client anonymity and censorship resistance.
+# Note: server location is NOT hidden — the Hetzner IP is publicly associated
+# with the service. See docs/TOR_ARCHITECTURE.md for the honest threat model.
+HiddenServiceDir /var/lib/tor/sublemonable-relay
+HiddenServicePort 80 server:8443

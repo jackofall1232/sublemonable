@@ -2,10 +2,21 @@
 # Licensed under the GNU Affero General Public License v3.0 or later.
 # SPDX-License-Identifier: AGPL-3.0-only
 #
-# Optional Tor hidden service overlay:
+# Optional Tor overlay — runs three hidden services on the same box:
+#   1. Public download mirror  (published in docs)
+#   2. Secret resilience mirror (unpublished, word-of-mouth)
+#   3. Relay onion              (unpublished, baked into app)
+#
+# Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.tor.yml up -d
-# Read your .onion address with:
-#   docker compose exec tor cat /var/lib/tor/sublemonable/hostname
+#
+# Read your .onion addresses:
+#   docker compose exec tor cat /var/lib/tor/sublemonable-mirror-public/hostname
+#   docker compose exec tor cat /var/lib/tor/sublemonable-mirror-secret/hostname
+#   docker compose exec tor cat /var/lib/tor/sublemonable-relay/hostname
+#
+# Then set PUBLIC_ONION_ADDRESS, SECRET_ONION_ADDRESS, RELAY_ONION_ADDRESS,
+# and TOR_ENABLED=true in .env and restart: docker compose ... up -d server
 
 services:
   tor:
@@ -17,22 +28,14 @@ services:
       - tor-data:/var/lib/tor
 
   server:
-    # The clearnet 8443 publish inherited from docker-compose.yml is kept on
-    # purpose: a hybrid box serves the API on clearnet (behind a reverse proxy)
-    # while the hidden service serves the same port over Tor. The static mirror
-    # is NOT exposed on clearnet — the server serves it only when the request
-    # Host is ONION_ADDRESS (see registerOnionMirror in server/cmd/server);
-    # ordinary clearnet / IP-scanner traffic falls through to the API. The hidden
-    # service reaches the server over the internal compose network (tor ->
-    # server:8443).
+    # The clearnet 8443 publish from docker-compose.yml is intentionally kept.
+    # A hybrid box serves the API on clearnet (behind Caddy) AND over Tor.
+    # All three hidden services forward to the same port; the Go server
+    # distinguishes them by Host header (see server/cmd/server/onion.go).
     environment:
       TOR_ENABLED: "true"
-      # Serve the static no-JS mirror site (APK + checksums + self-hosting docs)
-      # at the root of the hidden service.
       ONION_SITE_DIR: /srv/onion
     volumes:
-      # Read-only mirror content. Docker Compose merges this with the base
-      # service's volumes (the JWT keys mount), so both are present.
       - ./onion-site:/srv/onion:ro
 
 volumes:

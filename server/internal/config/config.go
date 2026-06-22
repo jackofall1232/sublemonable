@@ -28,7 +28,16 @@ type Config struct {
 	// the hidden service. Empty disables it — clearnet deployments serve no site.
 	OnionSiteDir string
 	// v1.5 — Tor-first + dead drops + multi-hop relay.
-	OnionAddress      string   // v3 .onion address this deployment is reachable at
+	OnionAddress string // legacy single .onion address (still parsed; superseded by the three below)
+	// Three separate hidden services share one box, distinguished by Host header
+	// (see server/cmd/server/onion.go). Public + secret serve the mirror; relay
+	// serves the API only. Empty values fail closed — they never match a Host.
+	PublicOnionAddress string // published in docs + sublemonable.com — serves the static APK mirror
+	SecretOnionAddress string // unpublished, word-of-mouth — same mirror content, separate address
+	RelayOnionAddress  string // unpublished, baked into app binary — serves the API relay only
+	// I2P skeleton — parsed but unused in v1.5 (see docs/TOR_ARCHITECTURE.md §7).
+	I2PEnabled        bool     // future master switch for live I2P traffic
+	I2PEepsiteDest    string   // future: base64 I2P destination
 	DropTTLHours      int      // dead-drop lifetime, collected or not
 	DropPoWDifficulty int      // leading zero bits required on deposit proof-of-work
 	RelayPrivateKey   string   // base64 Curve25519 private key; enables /relay/forward when set
@@ -50,11 +59,22 @@ func Load() (*Config, error) {
 		TorEnabled:                 envBool("TOR_ENABLED", false),
 		OnionSiteDir:               os.Getenv("ONION_SITE_DIR"),
 		OnionAddress:               os.Getenv("ONION_ADDRESS"),
+		PublicOnionAddress:         os.Getenv("PUBLIC_ONION_ADDRESS"),
+		SecretOnionAddress:         os.Getenv("SECRET_ONION_ADDRESS"),
+		RelayOnionAddress:          os.Getenv("RELAY_ONION_ADDRESS"),
+		I2PEnabled:                 envBool("I2P_ENABLED", false),
+		I2PEepsiteDest:             os.Getenv("I2P_EEPSITE_DEST"),
 		DropTTLHours:               envInt("DROP_TTL_HOURS", 72),
 		DropPoWDifficulty:          envInt("DROP_POW_DIFFICULTY", 20),
 		RelayPrivateKey:            os.Getenv("RELAY_PRIVATE_KEY"),
 		RelayPublicKey:             os.Getenv("RELAY_PUBLIC_KEY"),
 		RelayPeers:                 splitCSV(os.Getenv("RELAY_PEERS")),
+	}
+	// Backward compatibility: a pre-v1.5 deployment set only ONION_ADDRESS. Treat
+	// it as the public mirror address so single-onion deployments keep serving the
+	// mirror without a config change. PUBLIC_ONION_ADDRESS wins when both are set.
+	if cfg.PublicOnionAddress == "" {
+		cfg.PublicOnionAddress = cfg.OnionAddress
 	}
 	// A negative proof-of-work difficulty would make every nonce "valid" — never
 	// trust a misconfigured value; fall back to the secure default.

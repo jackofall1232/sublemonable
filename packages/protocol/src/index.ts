@@ -7,6 +7,7 @@ export * from "./envelope.js";
 export * from "./events.js";
 export * from "./keys.js";
 export * from "./connection.js";
+export * from "./transport.js";
 export * from "./deaddrop.js";
 export * from "./relay.js";
 export * from "./privacy.js";

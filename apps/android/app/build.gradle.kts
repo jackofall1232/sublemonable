@@ -20,6 +20,15 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Relay onion address — NEVER published or committed. Injected from the
+        // build environment so the relay hidden service stays out of the source
+        // tree. Empty string when unset (clearnet/dev builds).
+        buildConfigField(
+            "String",
+            "RELAY_ONION_ADDRESS",
+            "\"${System.getenv("RELAY_ONION_ADDRESS") ?: ""}\""
+        )
     }
 
     buildTypes {
@@ -51,6 +60,8 @@ android {
 
     buildFeatures {
         compose = true
+        // Required for the RELAY_ONION_ADDRESS buildConfigField above.
+        buildConfig = true
     }
 
     composeOptions {

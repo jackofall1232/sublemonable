@@ -11,6 +11,11 @@ const require = createRequire(import.meta.url);
 
 export default defineConfig({
   plugins: [react()],
+  // The relay onion address is baked in at build time and never committed. Set
+  // VITE_RELAY_ONION_ADDRESS in the build environment; it falls back to "".
+  define: {
+    __RELAY_ONION_ADDRESS__: JSON.stringify(process.env.VITE_RELAY_ONION_ADDRESS ?? ""),
+  },
   resolve: {
     alias: {
       // libsodium.js ships a broken ESM entry — use the CJS build (Vite

@@ -11,10 +11,12 @@
 import {
   CONNECTION_MODES,
   DEFAULT_CONNECTION_MODE,
+  DEFAULT_PREFERRED_TRANSPORT,
   DEFAULT_PRIVACY_VIEW,
   privacyViewActive,
   type ConnectionMode,
   type CoverTrafficIntensity,
+  type PreferredTransport,
   type PrivacyViewSettings,
   type RevealMode,
   type TransportState,
@@ -27,6 +29,13 @@ const STORAGE_KEY = "sublemonable.settings.v1_5";
 interface PersistedSettings {
   connectionMode: ConnectionMode;
   coverTraffic: CoverTrafficIntensity;
+  /** Preferred anonymous transport. In v1.5, i2p_first falls back to Tor. */
+  preferredTransport: PreferredTransport;
+  /**
+   * When false, the app refuses to connect over clearnet — the transport
+   * resolver reports "offline" instead of "clearnet_fallback". Default true.
+   */
+  allowClearnetFallback: boolean;
   privacyView: PrivacyViewSettings;
 }
 
@@ -34,6 +43,8 @@ function load(): PersistedSettings {
   const fallback: PersistedSettings = {
     connectionMode: DEFAULT_CONNECTION_MODE,
     coverTraffic: CONNECTION_MODES[DEFAULT_CONNECTION_MODE].decoyIntensity,
+    preferredTransport: DEFAULT_PREFERRED_TRANSPORT,
+    allowClearnetFallback: true,
     privacyView: DEFAULT_PRIVACY_VIEW,
   };
   try {
@@ -58,6 +69,8 @@ interface SettingsState extends PersistedSettings {
   transport: TransportState;
   setConnectionMode: (mode: ConnectionMode) => void;
   setCoverTraffic: (intensity: CoverTrafficIntensity) => void;
+  setPreferredTransport: (t: PreferredTransport) => void;
+  setAllowClearnetFallback: (allow: boolean) => void;
   setTransport: (transport: TransportState) => void;
   setGlobalPrivacyView: (on: boolean) => void;
   setRevealMode: (mode: RevealMode) => void;
@@ -69,8 +82,9 @@ interface SettingsState extends PersistedSettings {
 export const useSettings = create<SettingsState>((set, get) => {
   const initial = load();
   const persist = () => {
-    const { connectionMode, coverTraffic, privacyView } = get();
-    save({ connectionMode, coverTraffic, privacyView });
+    const { connectionMode, coverTraffic, preferredTransport, allowClearnetFallback, privacyView } =
+      get();
+    save({ connectionMode, coverTraffic, preferredTransport, allowClearnetFallback, privacyView });
   };
 
   return {
@@ -91,6 +105,14 @@ export const useSettings = create<SettingsState>((set, get) => {
     },
     setCoverTraffic(intensity) {
       set({ coverTraffic: intensity });
+      persist();
+    },
+    setPreferredTransport(t) {
+      set({ preferredTransport: t });
+      persist();
+    },
+    setAllowClearnetFallback(allow) {
+      set({ allowClearnetFallback: allow });
       persist();
     },
     setTransport(transport) {

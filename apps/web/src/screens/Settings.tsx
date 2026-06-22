@@ -4,12 +4,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useState } from "react";
-import { CONNECTION_MODES, type ConnectionMode, type RevealMode } from "@sublemonable/protocol";
+import {
+  CONNECTION_MODES,
+  type ConnectionMode,
+  type PreferredTransport,
+  type RevealMode,
+} from "@sublemonable/protocol";
 import { useApp } from "../store.js";
 import { useSettings } from "../settings.js";
 
 const MODES: ConnectionMode[] = ["standard", "stealth", "ghost"];
 const COVER: Array<"off" | "low" | "medium" | "high"> = ["off", "low", "medium", "high"];
+const TRANSPORTS: Array<{ id: PreferredTransport; label: string }> = [
+  { id: "tor_first", label: "Tor first (recommended)" },
+  { id: "i2p_first", label: "I2P first" },
+];
 const REVEAL: Array<{ id: RevealMode; label: string }> = [
   { id: "hold_to_reveal", label: "Hold to reveal" },
   { id: "tap_timed", label: "Tap (timed)" },
@@ -29,9 +38,13 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const connectionMode = useSettings((s) => s.connectionMode);
   const coverTraffic = useSettings((s) => s.coverTraffic);
   const transport = useSettings((s) => s.transport);
+  const preferredTransport = useSettings((s) => s.preferredTransport);
+  const allowClearnetFallback = useSettings((s) => s.allowClearnetFallback);
   const privacyView = useSettings((s) => s.privacyView);
   const setConnectionMode = useSettings((s) => s.setConnectionMode);
   const setCoverTraffic = useSettings((s) => s.setCoverTraffic);
+  const setPreferredTransport = useSettings((s) => s.setPreferredTransport);
+  const setAllowClearnetFallback = useSettings((s) => s.setAllowClearnetFallback);
   const setGlobalPrivacyView = useSettings((s) => s.setGlobalPrivacyView);
   const setRevealMode = useSettings((s) => s.setRevealMode);
 
@@ -76,9 +89,13 @@ export function Settings({ onClose }: { onClose: () => void }) {
             value={
               transport === "tor"
                 ? "Tor active (.onion)"
-                : transport === "clearnet_fallback"
-                  ? "Clearnet fallback — open in Tor Browser via .onion for Tor"
-                  : "Offline"
+                : transport === "i2p"
+                  ? "I2P active"
+                  : transport === "clearnet_fallback"
+                    ? "Clearnet fallback — open in Tor Browser via .onion for Tor"
+                    : allowClearnetFallback
+                      ? "Offline"
+                      : "Tor unavailable — connection refused (clearnet fallback disabled)"
             }
           />
           <div className="flex flex-col gap-1">
@@ -112,6 +129,45 @@ export function Settings({ onClose }: { onClose: () => void }) {
             <p className="text-xs text-ink-muted">
               Continuous decoy traffic makes a real send indistinguishable from idle. Higher levels
               use more battery.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-ink-secondary">Anonymous transport</span>
+            <div className="flex gap-2">
+              {TRANSPORTS.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setPreferredTransport(t.id)}
+                  className={`rounded-full px-3 py-1 text-xs ${preferredTransport === t.id ? "bg-lemon text-ink-on-lemon" : "border border-line text-ink-secondary hover:text-lemon"}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {preferredTransport === "i2p_first" && (
+              <p className="text-xs text-ink-muted">
+                I2P support is coming in a future release. Selecting this falls back to Tor until
+                I2P is available.
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm text-ink-secondary">
+                Fallback to clearnet if anonymous transport fails
+              </span>
+              <button
+                onClick={() => setAllowClearnetFallback(!allowClearnetFallback)}
+                aria-pressed={allowClearnetFallback}
+                className={`rounded-full px-3 py-1 text-xs ${allowClearnetFallback ? "bg-lemon text-ink-on-lemon" : "border border-line text-ink-secondary"}`}
+              >
+                {allowClearnetFallback ? "On" : "Off"}
+              </button>
+            </div>
+            <p className="text-xs text-ink-muted">
+              {allowClearnetFallback
+                ? "When Tor and I2P are both unavailable, the app connects over clearnet and shows a warning."
+                : "Disabling clearnet fallback may make the app unusable if Tor is blocked or slow. Only disable this if you are certain Tor is reliable on your network."}
             </p>
           </div>
         </Section>
