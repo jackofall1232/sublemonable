@@ -12,11 +12,10 @@ import type {
   DropRedeemResponse,
 } from "@sublemonable/protocol";
 import { isTauri, nativeRequest } from "./nativeTransport.js";
+import { getServerUrl, SERVER_URL } from "../config.js";
+import { useSettings } from "../settings.js";
 
-export const SERVER_URL: string =
-  (import.meta.env.VITE_SERVER_URL as string | undefined) ?? "http://localhost:8443";
-
-export const WS_URL: string = SERVER_URL.replace(/^http/, "ws") + "/ws";
+export { SERVER_URL };
 
 interface TokenPair {
   access_token: string;
@@ -28,12 +27,15 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
 
+  // Dial the relay onion when Tor is the live transport, else clearnet.
+  const baseUrl = getServerUrl(useSettings.getState().transport);
+
   // Desktop (Tauri): route through the native certificate-pinned client. The
   // browser PWA falls through to fetch below, unchanged.
   if (isTauri()) {
     const { status, body } = await nativeRequest(
       init.method ?? "GET",
-      `${SERVER_URL}${path}`,
+      `${baseUrl}${path}`,
       headers,
       init.body as string | undefined,
     );
@@ -50,7 +52,7 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
     return JSON.parse(body) as T;
   }
 
-  const res = await fetch(`${SERVER_URL}${path}`, { ...init, headers });
+  const res = await fetch(`${baseUrl}${path}`, { ...init, headers });
   if (!res.ok) {
     let code = "request_failed";
     try {

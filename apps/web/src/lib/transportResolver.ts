@@ -34,18 +34,17 @@ export async function resolveTransport(
   isTauriApp: boolean,
   allowClearnetFallback = true,
 ): Promise<TransportResolution> {
-  const torActive = await detectTor(isTauriApp);
-  const i2pActive = await detectI2P(); // always false in v1.5
-
+  // Probe lazily in fallback-chain order so each branch only does the work its
+  // chain requires (and matches the documented order; see docs/TOR_ARCHITECTURE.md).
   if (preferred === "tor_first") {
-    if (torActive) return { transport: "tor", showClearnetWarning: false };
-    if (i2pActive) return { transport: "i2p", showClearnetWarning: false };
+    if (await detectTor(isTauriApp)) return { transport: "tor", showClearnetWarning: false };
+    if (await detectI2P()) return { transport: "i2p", showClearnetWarning: false };
     return clearnetOrOffline(allowClearnetFallback);
   }
 
-  // i2p_first
-  if (i2pActive) return { transport: "i2p", showClearnetWarning: false };
-  if (torActive) {
+  // i2p_first — probe I2P first, then Tor, then clearnet.
+  if (await detectI2P()) return { transport: "i2p", showClearnetWarning: false };
+  if (await detectTor(isTauriApp)) {
     // I2P was preferred but unavailable; Tor is still an anonymous transport, so
     // this is an info-level fallback, not a security warning (no banner).
     return { transport: "tor", showClearnetWarning: false };
@@ -73,10 +72,17 @@ async function detectTor(isTauriApp: boolean): Promise<boolean> {
   if (isTauriApp) {
     // The Rust backend probes for a local Tor SOCKS proxy on startup and stores
     // the result. get_proxy_config returns the active proxy ({ host, port }) or
-    // null — a non-null config means Tor routing is active.
+    // null — a non-null config means Tor routing is active. Read the injected
+    // Tauri global directly rather than dynamically importing
+    // @tauri-apps/api/core, which can break the pure web build under Vite/Rollup.
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const result = await invoke<{ host: string; port: number } | null>("get_proxy_config");
+      const invoke = (
+        window as unknown as {
+          __TAURI__?: { core?: { invoke?: (cmd: string) => Promise<unknown> } };
+        }
+      ).__TAURI__?.core?.invoke;
+      if (!invoke) return false;
+      const result = (await invoke("get_proxy_config")) as { host: string; port: number } | null;
       return result != null;
     } catch {
       return false;

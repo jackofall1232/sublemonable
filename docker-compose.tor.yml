@@ -35,6 +35,9 @@ services:
     environment:
       TOR_ENABLED: "true"
       ONION_SITE_DIR: /srv/onion
+      PUBLIC_ONION_ADDRESS: ${PUBLIC_ONION_ADDRESS:-}
+      SECRET_ONION_ADDRESS: ${SECRET_ONION_ADDRESS:-}
+      RELAY_ONION_ADDRESS: ${RELAY_ONION_ADDRESS:-}
     volumes:
       - ./onion-site:/srv/onion:ro
 

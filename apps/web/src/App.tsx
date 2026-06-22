@@ -33,6 +33,8 @@ export default function App() {
   const preferredTransport = useSettings((s) => s.preferredTransport);
   const allowClearnetFallback = useSettings((s) => s.allowClearnetFallback);
   const setTransport = useSettings((s) => s.setTransport);
+  const fallbackReason = useSettings((s) => s.fallbackReason);
+  const setFallbackReason = useSettings((s) => s.setFallbackReason);
   // Dismissal is per-session: the banner re-appears on the next resolve while
   // clearnet is still active, because the trade-off is still in effect.
   const [warningDismissed, setWarningDismissed] = useState(false);
@@ -48,12 +50,20 @@ export default function App() {
     void resolveTransport(preferredTransport, isTauri(), allowClearnetFallback).then((res) => {
       if (cancelled) return;
       setTransport(res.transport);
+      setFallbackReason(res.fallbackReason ?? null);
+      // Gate the real transport: when clearnet fallback is disabled and only
+      // clearnet is available, the resolver returns "offline". Tear down any
+      // live socket and do NOT connect — the secondary guard in
+      // WsClient.connect() backstops this so nothing leaks onto clearnet.
+      if (res.transport === "offline") {
+        useApp.getState().ws?.close();
+      }
       if (res.showClearnetWarning) setWarningDismissed(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [preferredTransport, allowClearnetFallback, setTransport]);
+  }, [preferredTransport, allowClearnetFallback, setTransport, setFallbackReason]);
 
   const showClearnetBanner =
     phase === "ready" && transport === "clearnet_fallback" && !warningDismissed;
@@ -64,6 +74,7 @@ export default function App() {
 
       {showClearnetBanner && (
         <ClearnetWarningBanner
+          reason={fallbackReason ?? undefined}
           onOpenSettings={() => setSettingsOpen(true)}
           onDismiss={() => setWarningDismissed(true)}
         />

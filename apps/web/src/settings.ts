@@ -67,11 +67,17 @@ function save(s: PersistedSettings): void {
 interface SettingsState extends PersistedSettings {
   /** Live transport state — Tor is the default; clearnet is a flagged fallback. */
   transport: TransportState;
+  /**
+   * Human-readable reason the resolver fell back to clearnet, shown in the
+   * warning banner. Transient (not persisted) — null when no fallback is active.
+   */
+  fallbackReason: string | null;
   setConnectionMode: (mode: ConnectionMode) => void;
   setCoverTraffic: (intensity: CoverTrafficIntensity) => void;
   setPreferredTransport: (t: PreferredTransport) => void;
   setAllowClearnetFallback: (allow: boolean) => void;
   setTransport: (transport: TransportState) => void;
+  setFallbackReason: (reason: string | null) => void;
   setGlobalPrivacyView: (on: boolean) => void;
   setRevealMode: (mode: RevealMode) => void;
   setTapTimedSeconds: (seconds: number) => void;
@@ -97,6 +103,7 @@ export const useSettings = create<SettingsState>((set, get) => {
       typeof location !== "undefined" && location.hostname.endsWith(".onion")
         ? "tor"
         : "clearnet_fallback",
+    fallbackReason: null,
 
     setConnectionMode(mode) {
       // Selecting a mode sets its bundled cover-traffic intensity too.
@@ -117,6 +124,9 @@ export const useSettings = create<SettingsState>((set, get) => {
     },
     setTransport(transport) {
       set({ transport });
+    },
+    setFallbackReason(reason) {
+      set({ fallbackReason: reason });
     },
     setGlobalPrivacyView(on) {
       set((s) => ({ privacyView: { ...s.privacyView, globalEnabled: on } }));
