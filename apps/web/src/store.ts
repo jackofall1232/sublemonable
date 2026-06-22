@@ -205,7 +205,15 @@ export const useApp = create<AppState>((set, get) => {
     if (get().phase !== "ready") return;
     stopDecoy();
     get().ws?.close();
-    if (s.transport !== "offline") connect();
+    if (s.transport === "offline") {
+      // Drop the closed client. Leaving it in state would let sendMessage's
+      // `!ws` check pass and queue composes into a dead socket that is then
+      // abandoned (messages silently lost) when transport re-enables. Nulling
+      // it makes sendMessage no-op while offline.
+      set({ ws: null });
+    } else {
+      connect();
+    }
   });
 
   const appendMessage = (peerId: string, message: Message): void => {

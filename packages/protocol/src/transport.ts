@@ -43,7 +43,7 @@ export interface TransportResolution {
  */
 export const CLEARNET_WARNING = {
   title: "Tor unavailable — using clearnet",
-  body: "Your connection is not routed through Tor. Your IP address may be visible to the relay. Toggling off Tor removes a layer of anonymity protection.",
+  body: "Your connection is not routed through Tor. Your IP address may be visible to the relay. Disable clearnet fallback in Network settings to refuse non-Tor connections.",
   settingsLink: "Network settings",
 } as const;
 

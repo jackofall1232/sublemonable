@@ -37,7 +37,10 @@ export const SERVER_URL: string =
  */
 export function getServerUrl(transport: TransportState): string {
   if (transport === "tor" && RELAY_ONION_ADDRESS && !isTauri()) {
-    return `http://${RELAY_ONION_ADDRESS}`;
+    // Tolerate an address misconfigured with a scheme prefix so we don't build
+    // a malformed "http://http://…" URL.
+    const host = RELAY_ONION_ADDRESS.replace(/^https?:\/\//i, "");
+    return `http://${host}`;
   }
   return SERVER_URL;
 }

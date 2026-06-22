@@ -99,10 +99,15 @@ export const useSettings = create<SettingsState>((set, get) => {
     // the Tor Browser with the deployment's .onion address. We surface Tor as
     // active when the page is served from an .onion host, else a clearnet
     // fallback — honest about the browser's limits.
+    // Fail closed at startup: until resolveTransport runs, a fallback-disabled
+    // client must read as "offline" so no REST/WS leaks over clearnet during the
+    // bootstrap/unlock window. An .onion host is genuine Tor regardless.
     transport:
       typeof location !== "undefined" && location.hostname.endsWith(".onion")
         ? "tor"
-        : "clearnet_fallback",
+        : initial.allowClearnetFallback
+          ? "clearnet_fallback"
+          : "offline",
     fallbackReason: null,
 
     setConnectionMode(mode) {
