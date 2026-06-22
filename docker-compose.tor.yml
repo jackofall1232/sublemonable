@@ -19,6 +19,13 @@ services:
   server:
     environment:
       TOR_ENABLED: "true"
+      # Serve the static no-JS mirror site (APK + checksums + self-hosting docs)
+      # at the root of the hidden service.
+      ONION_SITE_DIR: /srv/onion
+    volumes:
+      # Read-only mirror content. Docker Compose merges this with the base
+      # service's volumes (the JWT keys mount), so both are present.
+      - ./onion-site:/srv/onion:ro
 
 volumes:
   tor-data:
