@@ -11,10 +11,12 @@
 import {
   CONNECTION_MODES,
   DEFAULT_CONNECTION_MODE,
+  DEFAULT_PREFERRED_TRANSPORT,
   DEFAULT_PRIVACY_VIEW,
   privacyViewActive,
   type ConnectionMode,
   type CoverTrafficIntensity,
+  type PreferredTransport,
   type PrivacyViewSettings,
   type RevealMode,
   type TransportState,
@@ -27,6 +29,13 @@ const STORAGE_KEY = "sublemonable.settings.v1_5";
 interface PersistedSettings {
   connectionMode: ConnectionMode;
   coverTraffic: CoverTrafficIntensity;
+  /** Preferred anonymous transport. In v1.5, i2p_first falls back to Tor. */
+  preferredTransport: PreferredTransport;
+  /**
+   * When false, the app refuses to connect over clearnet — the transport
+   * resolver reports "offline" instead of "clearnet_fallback". Default true.
+   */
+  allowClearnetFallback: boolean;
   privacyView: PrivacyViewSettings;
 }
 
@@ -34,6 +43,8 @@ function load(): PersistedSettings {
   const fallback: PersistedSettings = {
     connectionMode: DEFAULT_CONNECTION_MODE,
     coverTraffic: CONNECTION_MODES[DEFAULT_CONNECTION_MODE].decoyIntensity,
+    preferredTransport: DEFAULT_PREFERRED_TRANSPORT,
+    allowClearnetFallback: true,
     privacyView: DEFAULT_PRIVACY_VIEW,
   };
   try {
@@ -56,9 +67,17 @@ function save(s: PersistedSettings): void {
 interface SettingsState extends PersistedSettings {
   /** Live transport state — Tor is the default; clearnet is a flagged fallback. */
   transport: TransportState;
+  /**
+   * Human-readable reason the resolver fell back to clearnet, shown in the
+   * warning banner. Transient (not persisted) — null when no fallback is active.
+   */
+  fallbackReason: string | null;
   setConnectionMode: (mode: ConnectionMode) => void;
   setCoverTraffic: (intensity: CoverTrafficIntensity) => void;
+  setPreferredTransport: (t: PreferredTransport) => void;
+  setAllowClearnetFallback: (allow: boolean) => void;
   setTransport: (transport: TransportState) => void;
+  setFallbackReason: (reason: string | null) => void;
   setGlobalPrivacyView: (on: boolean) => void;
   setRevealMode: (mode: RevealMode) => void;
   setTapTimedSeconds: (seconds: number) => void;
@@ -69,8 +88,9 @@ interface SettingsState extends PersistedSettings {
 export const useSettings = create<SettingsState>((set, get) => {
   const initial = load();
   const persist = () => {
-    const { connectionMode, coverTraffic, privacyView } = get();
-    save({ connectionMode, coverTraffic, privacyView });
+    const { connectionMode, coverTraffic, preferredTransport, allowClearnetFallback, privacyView } =
+      get();
+    save({ connectionMode, coverTraffic, preferredTransport, allowClearnetFallback, privacyView });
   };
 
   return {
@@ -79,10 +99,16 @@ export const useSettings = create<SettingsState>((set, get) => {
     // the Tor Browser with the deployment's .onion address. We surface Tor as
     // active when the page is served from an .onion host, else a clearnet
     // fallback — honest about the browser's limits.
+    // Fail closed at startup: until resolveTransport runs, a fallback-disabled
+    // client must read as "offline" so no REST/WS leaks over clearnet during the
+    // bootstrap/unlock window. An .onion host is genuine Tor regardless.
     transport:
       typeof location !== "undefined" && location.hostname.endsWith(".onion")
         ? "tor"
-        : "clearnet_fallback",
+        : initial.allowClearnetFallback
+          ? "clearnet_fallback"
+          : "offline",
+    fallbackReason: null,
 
     setConnectionMode(mode) {
       // Selecting a mode sets its bundled cover-traffic intensity too.
@@ -93,8 +119,19 @@ export const useSettings = create<SettingsState>((set, get) => {
       set({ coverTraffic: intensity });
       persist();
     },
+    setPreferredTransport(t) {
+      set({ preferredTransport: t });
+      persist();
+    },
+    setAllowClearnetFallback(allow) {
+      set({ allowClearnetFallback: allow });
+      persist();
+    },
     setTransport(transport) {
       set({ transport });
+    },
+    setFallbackReason(reason) {
+      set({ fallbackReason: reason });
     },
     setGlobalPrivacyView(on) {
       set((s) => ({ privacyView: { ...s.privacyView, globalEnabled: on } }));

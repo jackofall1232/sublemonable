@@ -4,7 +4,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { ClientEvent, ServerEvent } from "@sublemonable/protocol";
-import { WS_URL } from "./api.js";
+import { getServerUrl } from "../config.js";
+import { useSettings } from "../settings.js";
 import { isTauri, NativeWsSocket } from "./nativeTransport.js";
 
 export type WsStatus = "connecting" | "open" | "closed";
@@ -27,14 +28,24 @@ export class WsClient {
   ) {}
 
   async connect(): Promise<void> {
+    // Secondary guard: never open a socket when the resolved transport is
+    // "offline" (clearnet fallback disabled and no anonymous transport). This
+    // backstops the App-level gate so a stray connect() can't leak onto clearnet.
+    const transport = useSettings.getState().transport;
+    if (transport === "offline") {
+      this.onStatus("closed");
+      return;
+    }
     this.closedByUs = false;
     this.onStatus("connecting");
     const token = await this.getToken();
+    // Dial the relay onion over Tor, else clearnet; mirror api.ts's base URL.
+    const wsUrl = getServerUrl(transport).replace(/^http/, "ws") + "/ws";
     // Desktop (Tauri): pinned native WebSocket. Browser: standard WebSocket with
     // the JWT as the Sec-WebSocket-Protocol value. Both expose the same surface.
     const socket: WebSocket | NativeWsSocket = isTauri()
       ? new NativeWsSocket(token)
-      : new WebSocket(WS_URL, [token]);
+      : new WebSocket(wsUrl, [token]);
     this.socket = socket;
 
     socket.onopen = () => {

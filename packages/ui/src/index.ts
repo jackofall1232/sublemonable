@@ -43,4 +43,5 @@ export {
   type TransportState,
 } from "./ConnectionModeBadge.js";
 export { PlatformWarningBadge, type PlatformWarningBadgeProps } from "./PlatformWarningBadge.js";
+export { ClearnetWarningBanner, type ClearnetWarningBannerProps } from "./ClearnetWarningBanner.js";
 export { PrivacyView, type PrivacyViewProps, type RevealMode } from "./PrivacyView.js";

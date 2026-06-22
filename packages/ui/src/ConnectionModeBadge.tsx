@@ -15,7 +15,7 @@ import { LemonSlice } from "./LemonSlice.js";
 import { color } from "./tokens.js";
 
 export type ConnectionMode = "standard" | "stealth" | "ghost";
-export type TransportState = "tor" | "clearnet_fallback" | "offline";
+export type TransportState = "tor" | "i2p" | "clearnet_fallback" | "offline";
 
 export interface ConnectionModeBadgeProps {
   mode: ConnectionMode;
@@ -42,11 +42,16 @@ export function ConnectionModeBadge({ mode, transport, size = 18 }: ConnectionMo
   const fallback = transport === "clearnet_fallback";
   const offline = transport === "offline";
 
+  // I2P is treated like Tor for badge purposes: an anonymous transport is
+  // active, so no warning dot. (I2P is never emitted in v1.5; the branch is here
+  // so the badge is correct once I2P goes live.)
   const title = offline
     ? "No connection"
     : fallback
       ? "Tor unavailable — using direct connection"
-      : `${MODE_LABEL[mode]} · Tor active`;
+      : transport === "i2p"
+        ? `${MODE_LABEL[mode]} · I2P active`
+        : `${MODE_LABEL[mode]} · Tor active`;
 
   return (
     <span

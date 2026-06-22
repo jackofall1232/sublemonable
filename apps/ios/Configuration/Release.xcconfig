@@ -1,0 +1,13 @@
+// Sublemonable — Copyright (C) 2026 Sublemonable contributors
+// Licensed under the GNU Affero General Public License v3.0 or later.
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+// Release build configuration.
+//
+// The relay onion address is NEVER published or committed. It is injected from
+// the build environment (RELAY_ONION_ADDRESS) at build time so the relay hidden
+// service stays out of the source tree. Add a matching RELAY_ONION_ADDRESS entry
+// to Info.plist (value: $(RELAY_ONION_ADDRESS)) and read it in Swift via
+// Bundle.main.infoDictionary["RELAY_ONION_ADDRESS"]. Empty when unset.
+
+RELAY_ONION_ADDRESS = $(RELAY_ONION_ADDRESS)

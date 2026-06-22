@@ -4,5 +4,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 fn main() {
+    // Bake the relay onion address in at build time. It is NEVER published or
+    // committed — set RELAY_ONION_ADDRESS in the build environment so the relay
+    // hidden service stays out of the source tree. Empty when unset; rebuilt when
+    // the variable changes. Read it in Rust via env!("RELAY_ONION_ADDRESS").
+    println!("cargo:rerun-if-env-changed=RELAY_ONION_ADDRESS");
+    println!(
+        "cargo:rustc-env=RELAY_ONION_ADDRESS={}",
+        std::env::var("RELAY_ONION_ADDRESS").unwrap_or_default()
+    );
+
     tauri_build::build();
 }

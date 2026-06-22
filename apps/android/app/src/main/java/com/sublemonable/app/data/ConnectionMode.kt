@@ -15,8 +15,29 @@ package com.sublemonable.app.data
  */
 enum class CoverTrafficIntensity { OFF, LOW, MEDIUM, HIGH }
 
-/** Live transport state shown by the connection-mode badge. */
-enum class TransportState { TOR, CLEARNET_FALLBACK, OFFLINE }
+/**
+ * Live transport state shown by the connection-mode badge.
+ *
+ * I2P is a skeleton in v1.5 — never emitted — but present so this enum stays in
+ * lockstep with packages/protocol and a future release can enable it.
+ */
+enum class TransportState { TOR, I2P, CLEARNET_FALLBACK, OFFLINE }
+
+/**
+ * User-selectable preferred anonymous transport. TOR_FIRST tries Tor then I2P
+ * then clearnet; I2P_FIRST tries I2P then Tor then clearnet. In v1.5 I2P is a
+ * skeleton, so I2P_FIRST falls through to Tor. The option persists so the choice
+ * survives until I2P goes live. MUST stay in lockstep with packages/protocol
+ * transport.ts.
+ */
+enum class PreferredTransport {
+    TOR_FIRST,
+    I2P_FIRST;
+
+    companion object {
+        val DEFAULT = TOR_FIRST
+    }
+}
 
 enum class ConnectionMode(
     val label: String,

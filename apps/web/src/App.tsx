@@ -4,13 +4,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useEffect, useState } from "react";
-import { LemonSlice, LemonSpinner, SublemonableStyles } from "@sublemonable/ui";
+import {
+  ClearnetWarningBanner,
+  LemonSlice,
+  LemonSpinner,
+  SublemonableStyles,
+} from "@sublemonable/ui";
+import { isTauri } from "@sublemonable/crypto";
+import { resolveTransport } from "./lib/transportResolver.js";
 import { ScreenshotShield, useDevToolsWarning } from "./components/ScreenshotShield.js";
 import { ChatList } from "./screens/ChatList.js";
 import { ChatView } from "./screens/ChatView.js";
 import { Gate } from "./screens/Gate.js";
 import { Settings } from "./screens/Settings.js";
 import { VerifyKeys } from "./screens/VerifyKeys.js";
+import { useSettings } from "./settings.js";
 import { useApp } from "./store.js";
 
 export default function App() {
@@ -21,16 +29,59 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [verifyPeer, setVerifyPeer] = useState<string | null>(null);
 
+  const transport = useSettings((s) => s.transport);
+  const preferredTransport = useSettings((s) => s.preferredTransport);
+  const allowClearnetFallback = useSettings((s) => s.allowClearnetFallback);
+  const setTransport = useSettings((s) => s.setTransport);
+  const fallbackReason = useSettings((s) => s.fallbackReason);
+  const setFallbackReason = useSettings((s) => s.setFallbackReason);
+  // Dismissal is per-session: the banner re-appears on the next resolve while
+  // clearnet is still active, because the trade-off is still in effect.
+  const [warningDismissed, setWarningDismissed] = useState(false);
+
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  // Resolve the active transport along the fallback chain on startup and whenever
+  // the user changes their preference. A clearnet result un-dismisses the banner.
+  useEffect(() => {
+    let cancelled = false;
+    void resolveTransport(preferredTransport, isTauri(), allowClearnetFallback).then((res) => {
+      if (cancelled) return;
+      // Update the live transport. The store reconnects (or tears down, for
+      // "offline") in response — see the transport subscription in store.ts —
+      // so a clearnet socket is never left running while Tor is active. The
+      // api.ts/ws.ts guards are the hard backstops against any clearnet leak.
+      setTransport(res.transport);
+      setFallbackReason(res.fallbackReason ?? null);
+      if (res.showClearnetWarning) setWarningDismissed(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [preferredTransport, allowClearnetFallback, setTransport, setFallbackReason]);
+
+  const showClearnetBanner =
+    phase === "ready" && transport === "clearnet_fallback" && !warningDismissed;
 
   return (
     <div className="relative h-full">
       <SublemonableStyles />
 
+      {showClearnetBanner && (
+        <ClearnetWarningBanner
+          reason={fallbackReason ?? undefined}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onDismiss={() => setWarningDismissed(true)}
+        />
+      )}
+
       {devTools && phase === "ready" && (
-        <div role="alert" className="flex items-center justify-center gap-2 bg-burn-orange px-4 py-1.5 text-xs font-medium text-bg-primary">
+        <div
+          role="alert"
+          className="flex items-center justify-center gap-2 bg-burn-orange px-4 py-1.5 text-xs font-medium text-bg-primary"
+        >
           Developer tools appear to be open. Anything on screen can be read by extensions or
           inspected — close DevTools for sensitive conversations.
         </div>
@@ -52,7 +103,9 @@ export default function App() {
           ) : (
             <section className="flex flex-1 flex-col items-center justify-center gap-4 bg-bg-primary">
               <LemonSlice variant="logo_mark" size={96} />
-              <p className="font-display text-lg text-ink-secondary">Nothing lasts. That's the point.</p>
+              <p className="font-display text-lg text-ink-secondary">
+                Nothing lasts. That's the point.
+              </p>
             </section>
           )}
           <ScreenshotShield />

@@ -148,54 +148,83 @@ SPKI pinning is "reject anything not pinned", so order matters:
 Never remove a pin that the currently-served certificate depends on, and never ship a build with
 a single pin and no backup.
 
-## Optional Tor hidden service
+## Optional Tor hidden services
 
-The Tor overlay runs a hidden service that forwards onion port 80 to the server
-and, in addition to the API, serves a **static no-JS mirror** (download page,
-checksums, the Android APK) at the root of the `.onion`.
+The Tor overlay runs **three** hidden services on the same box, each with its own
+`.onion` address and purpose. They share one Go binary and one internal port
+(8443); the server distinguishes them by the request `Host` header. See
+[`docs/TOR_ARCHITECTURE.md`](TOR_ARCHITECTURE.md) for the full architecture and
+the honest threat model.
+
+1. **Public download mirror** — serve the APK to Tor Browser users. Publish this
+   address in your deployment's documentation.
+2. **Secret resilience mirror** — identical content, separate `.onion` address.
+   Share only by word-of-mouth. Provides continuity if the public mirror is
+   targeted.
+3. **Relay onion** — client anonymity for messaging. Never publish this address;
+   bake it into your app build.
+
+### Start the overlay
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.tor.yml up -d
-docker compose exec tor cat /var/lib/tor/sublemonable/hostname   # your .onion address
 ```
 
-Then set both in `.env` and restart the server so it picks them up:
+### Read your addresses
 
 ```bash
+docker compose exec tor cat /var/lib/tor/sublemonable-mirror-public/hostname
+docker compose exec tor cat /var/lib/tor/sublemonable-mirror-secret/hostname
+docker compose exec tor cat /var/lib/tor/sublemonable-relay/hostname
+```
+
+### Configure the server
+
+Set all three in `.env` and restart:
+
+```bash
+PUBLIC_ONION_ADDRESS=<public hostname>
+SECRET_ONION_ADDRESS=<secret hostname>
+RELAY_ONION_ADDRESS=<relay hostname>
 TOR_ENABLED=true
-ONION_ADDRESS=<the hostname you just read>     # e.g. abcd...xyz.onion
-```
 
-```bash
 docker compose -f docker-compose.yml -f docker-compose.tor.yml up -d server
 ```
 
-`TOR_ENABLED=true` makes the server advertise the onion address to clients;
-`ONION_ADDRESS` is also what gates the mirror (see below).
+(A pre-v1.5 deployment that set only `ONION_ADDRESS` keeps working: it is treated
+as the public mirror address when `PUBLIC_ONION_ADDRESS` is empty.)
 
 ### Clearnet + Tor coexist (hybrid)
 
-The clearnet `8443` port stays published, so a hybrid box keeps serving the API
-on clearnet (behind your reverse proxy) **and** over Tor. The static mirror,
-however, is **Host-gated**: the server serves it only when the request `Host` is
-your `ONION_ADDRESS`. This is why `ONION_ADDRESS` must be set — with it empty the
-mirror fails closed and is never served.
+The clearnet `8443` port stays published, so a hybrid box keeps serving the API on
+clearnet (behind your reverse proxy) **and** over Tor. The static mirror is
+**Host-gated**: it is served only when the request `Host` is the public or secret
+mirror address. The relay onion and any clearnet `Host` fall through to the API
+with no mirror — so the relay service is never correlated with the download
+service by an observer watching both onions. Empty addresses fail closed.
 
 | Request reaches the server as… | API | Static APK mirror |
 | --- | --- | --- |
-| `Host: <your>.onion` (via the hidden service) | ✅ served | ✅ served |
-| `Host: relay.example.com` / IP (clearnet) | ✅ served | ❌ 404 — not mounted |
+| `Host: <public>.onion` (public mirror) | ✅ served | ✅ served |
+| `Host: <secret>.onion` (secret mirror) | ✅ served | ✅ served |
+| `Host: <relay>.onion` (relay onion) | ✅ served | ❌ not mounted |
+| `Host: relay.example.com` / IP (clearnet) | ✅ served | ❌ not mounted |
 
 So ordinary clearnet visitors, search engines and IP scanners never see the
-mirror; only traffic arriving through the hidden service does.
+mirror; only traffic arriving through the public or secret mirror does.
 
-### Stage the APK before enabling the mirror
+### Back up your onion keys
+
+Each hidden service key is in
+`tor-data:/var/lib/tor/<dir>/hs_ed25519_secret_key`. Losing a key loses that
+`.onion` address permanently. Back up all three alongside your `.jks` keystore and
+JWT keys — see [Backup and recovery](#backup-and-recovery) below.
+
+### Stage the APK (required for the mirrors to show a download link)
 
 The Android APK and `aab`/keystore artifacts are **never committed to the
-repository** (they are `.gitignore`d). The mirror serves whatever you stage into
-the `onion-site/` directory, which is mounted read-only into the server. Before
-(or after) bringing the hidden service up, stage the release build and a matching
-checksum file:
+repository** (they are `.gitignore`d). Both mirrors serve whatever you stage into
+the `onion-site/` directory, which is mounted read-only into the server:
 
 ```bash
 # Copy the release APK you want to distribute into the mirror directory
@@ -214,7 +243,7 @@ The download page reacts to what is present:
   a 404. This is the expected state on a fresh clone.
 
 Future APK releases are published separately — re-run the two commands above with
-the new build to update the mirror; no rebuild of the server is required (the
+the new build to update both mirrors; no rebuild of the server is required (the
 directory is bind-mounted).
 
 ## Updating
@@ -234,7 +263,8 @@ There is intentionally little to back up — delivered messages are already gone
 - The PostgreSQL volume (public keys + undelivered envelopes):
   `docker compose exec postgres pg_dump -U sub sublemonable > backup.sql`
 - Your JWT signing keys (`server/keys/`) — losing them logs every client out
-- Your Tor hidden service keys (`tor-data` volume) — losing them changes your .onion address
+- Your Tor hidden service keys (`tor-data` volume) — all three `hs_ed25519_secret_key`
+  files; losing any one permanently changes that service's `.onion` address
 - Your offline certificate backup key (`backup-pin-key.pem`) — store it **off the server**; it is
   the only way to rotate to a pin clients already trust without shipping an app update first
 
