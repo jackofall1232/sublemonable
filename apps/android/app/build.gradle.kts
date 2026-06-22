@@ -27,7 +27,9 @@ android {
         buildConfigField(
             "String",
             "RELAY_ONION_ADDRESS",
-            "\"${System.getenv("RELAY_ONION_ADDRESS") ?: ""}\""
+            // providers.environmentVariable (not System.getenv) so Gradle tracks
+            // the env var as a build input and the configuration cache stays valid.
+            "\"${providers.environmentVariable("RELAY_ONION_ADDRESS").orNull ?: ""}\""
         )
     }
 

@@ -195,6 +195,19 @@ export const useApp = create<AppState>((set, get) => {
     if (accountId) startDecoy(ws, accountId);
   };
 
+  // Reconnect whenever the live transport changes — Tor recovering, the desktop
+  // connection-mode listener flipping, or the user toggling clearnet fallback.
+  // Tear down the socket bound to the old transport and re-dial over the new one
+  // so traffic never keeps riding clearnet while the badge claims Tor. An
+  // "offline" transport stays down (connect()'s guard would no-op anyway).
+  useSettings.subscribe((s, prev) => {
+    if (s.transport === prev.transport) return;
+    if (get().phase !== "ready") return;
+    stopDecoy();
+    get().ws?.close();
+    if (s.transport !== "offline") connect();
+  });
+
   const appendMessage = (peerId: string, message: Message): void => {
     set((s) => ({
       messages: { ...s.messages, [peerId]: [...(s.messages[peerId] ?? []), message] },

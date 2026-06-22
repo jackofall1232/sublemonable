@@ -49,15 +49,12 @@ export default function App() {
     let cancelled = false;
     void resolveTransport(preferredTransport, isTauri(), allowClearnetFallback).then((res) => {
       if (cancelled) return;
+      // Update the live transport. The store reconnects (or tears down, for
+      // "offline") in response — see the transport subscription in store.ts —
+      // so a clearnet socket is never left running while Tor is active. The
+      // api.ts/ws.ts guards are the hard backstops against any clearnet leak.
       setTransport(res.transport);
       setFallbackReason(res.fallbackReason ?? null);
-      // Gate the real transport: when clearnet fallback is disabled and only
-      // clearnet is available, the resolver returns "offline". Tear down any
-      // live socket and do NOT connect — the secondary guard in
-      // WsClient.connect() backstops this so nothing leaks onto clearnet.
-      if (res.transport === "offline") {
-        useApp.getState().ws?.close();
-      }
       if (res.showClearnetWarning) setWarningDismissed(false);
     });
     return () => {

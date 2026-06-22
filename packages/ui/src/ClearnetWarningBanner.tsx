@@ -50,7 +50,7 @@ export function ClearnetWarningBanner({
       {/* Shield-off mark: a lemon slice with a slash, drawn inline so the banner
           pulls in no external asset. */}
       <svg
-        aria-hidden
+        aria-hidden="true"
         width={16}
         height={16}
         viewBox="0 0 16 16"

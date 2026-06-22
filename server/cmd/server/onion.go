@@ -109,13 +109,19 @@ func isMirrorHost(c *fiber.Ctx, cfg *config.Config) bool {
 	return (pub != "" && host == pub) || (sec != "" && host == sec)
 }
 
-// normaliseHost strips any :port suffix and lowercases. An empty input yields an
-// empty string, which never matches a configured address — the fail-closed case.
+// normaliseHost strips any scheme prefix and :port suffix and lowercases. An
+// empty input yields an empty string, which never matches a configured address —
+// the fail-closed case. Stripping the scheme first guards against an operator
+// configuring *_ONION_ADDRESS with an "http://"/"https://" prefix, which would
+// otherwise make IndexByte match the scheme's colon and truncate the host.
 func normaliseHost(h string) string {
+	h = strings.TrimSpace(h)
+	h = strings.TrimPrefix(h, "https://")
+	h = strings.TrimPrefix(h, "http://")
 	if i := strings.IndexByte(h, ':'); i >= 0 {
 		h = h[:i]
 	}
-	return strings.ToLower(strings.TrimSpace(h))
+	return strings.ToLower(h)
 }
 
 // findStagedAPK returns the basename of the first *.apk in dir and whether one
