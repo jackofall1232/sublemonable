@@ -17,6 +17,15 @@ services:
       - tor-data:/var/lib/tor
 
   server:
+    # The hidden service reaches the server over the internal compose network
+    # (tor -> server:8443), so NO host port is needed here. Dropping the port
+    # publish inherited from docker-compose.yml is mandatory: with the onion
+    # mirror enabled (ONION_SITE_DIR below), a published 8443 would serve the
+    # Tor-only static mirror — APK included — on the public clearnet listener.
+    # `!reset` clears the value instead of concatenating (Compose merges ports).
+    ports: !reset []
+    expose:
+      - "8443"
     environment:
       TOR_ENABLED: "true"
       # Serve the static no-JS mirror site (APK + checksums + self-hosting docs)
