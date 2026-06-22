@@ -27,8 +27,15 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
 
+  // Refuse outright when the resolved transport is "offline" (clearnet fallback
+  // disabled and no anonymous transport): REST must not leak over clearnet just
+  // because the WebSocket path is gated. Mirrors WsClient.connect()'s guard.
+  const transport = useSettings.getState().transport;
+  if (transport === "offline") {
+    throw new ApiError(0, "transport_offline");
+  }
   // Dial the relay onion when Tor is the live transport, else clearnet.
-  const baseUrl = getServerUrl(useSettings.getState().transport);
+  const baseUrl = getServerUrl(transport);
 
   // Desktop (Tauri): route through the native certificate-pinned client. The
   // browser PWA falls through to fetch below, unchanged.

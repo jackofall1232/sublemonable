@@ -6,6 +6,7 @@
 // Build-time configuration injected by Vite (see vite.config.ts).
 
 import type { TransportState } from "@sublemonable/protocol";
+import { isTauri } from "@sublemonable/crypto";
 
 /**
  * The relay onion address. NEVER published in docs or committed to source — it
@@ -26,9 +27,16 @@ export const SERVER_URL: string =
  * transport and a relay onion was baked into this build, dial the relay `.onion`
  * directly so traffic actually rides the hidden service; otherwise fall back to
  * the clearnet SERVER_URL.
+ *
+ * Onion direct-dial is **web-only** (Tor Browser). The desktop app reaches the
+ * relay over a local Tor SOCKS proxy while still targeting the pinned clearnet
+ * host, so the pinned native transport only accepts https + the pinned API host
+ * (see apps/desktop/src-tauri/src/transport.rs). Handing it an http://<onion>
+ * URL would make it reject every REST call — so never return an onion URL under
+ * Tauri.
  */
 export function getServerUrl(transport: TransportState): string {
-  if (transport === "tor" && RELAY_ONION_ADDRESS) {
+  if (transport === "tor" && RELAY_ONION_ADDRESS && !isTauri()) {
     return `http://${RELAY_ONION_ADDRESS}`;
   }
   return SERVER_URL;
