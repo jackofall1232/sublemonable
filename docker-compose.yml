@@ -20,6 +20,7 @@ services:
       MESSAGE_TTL_UNDELIVERED_HOURS: ${MESSAGE_TTL_UNDELIVERED_HOURS:-72}
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
       TOR_ENABLED: ${TOR_ENABLED:-false}
+      ONION_ADDRESS: ${ONION_ADDRESS:-}
     volumes:
       - ./server/keys:/keys:ro
     ports:

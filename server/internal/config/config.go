@@ -23,6 +23,10 @@ type Config struct {
 	MessageTTLUndeliveredHours int
 	RateLimitEnabled           bool
 	TorEnabled                 bool
+	// OnionSiteDir, when set and TorEnabled, is served as a static no-JS mirror
+	// site (APK download + checksums + self-hosting instructions) at the root of
+	// the hidden service. Empty disables it — clearnet deployments serve no site.
+	OnionSiteDir string
 	// v1.5 — Tor-first + dead drops + multi-hop relay.
 	OnionAddress      string   // v3 .onion address this deployment is reachable at
 	DropTTLHours      int      // dead-drop lifetime, collected or not
@@ -44,6 +48,7 @@ func Load() (*Config, error) {
 		MessageTTLUndeliveredHours: envInt("MESSAGE_TTL_UNDELIVERED_HOURS", 72),
 		RateLimitEnabled:           envBool("RATE_LIMIT_ENABLED", true),
 		TorEnabled:                 envBool("TOR_ENABLED", false),
+		OnionSiteDir:               os.Getenv("ONION_SITE_DIR"),
 		OnionAddress:               os.Getenv("ONION_ADDRESS"),
 		DropTTLHours:               envInt("DROP_TTL_HOURS", 72),
 		DropPoWDifficulty:          envInt("DROP_POW_DIFFICULTY", 20),

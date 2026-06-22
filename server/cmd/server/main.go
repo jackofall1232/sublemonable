@@ -104,6 +104,16 @@ func main() {
 		hub.Serve(conn.Locals("ws_account_id").(uuid.UUID), conn)
 	}))
 
+	// Onion mirror: when running as a Tor hidden service with a site directory
+	// configured, serve a static no-JS mirror (APK download, checksums,
+	// self-hosting instructions). Registered after the API routes so they always
+	// take precedence, and Host-gated so the mirror answers only over the hidden
+	// service — a hybrid box keeps the clearnet API while never exposing the
+	// mirror off-Tor. See registerOnionMirror in onion.go.
+	if cfg.TorEnabled && cfg.OnionSiteDir != "" {
+		registerOnionMirror(app, cfg)
+	}
+
 	go janitor.Run(ctx, store, time.Duration(cfg.MessageTTLUndeliveredHours)*time.Hour)
 
 	go func() {

@@ -26,6 +26,13 @@ apps/android/local.properties
 apps/android/.idea/
 *.keystore
 
+# Android release/signing artifacts — distributed via the onion mirror /
+# GitHub Releases, never committed (build/ and *.keystore already excluded above)
+*.apk
+*.aab
+*.jks
+release/
+
 # Secrets — never commit keys
 *.pem
 *.key

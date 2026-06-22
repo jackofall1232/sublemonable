@@ -13,6 +13,10 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
 
+# Tink (via androidx.security:security-crypto) references Error Prone build-time
+# annotations that aren't on the runtime classpath — safe to ignore.
+-dontwarn com.google.errorprone.annotations.**
+
 # ZXing (pure Java).
 -keep class com.google.zxing.** { *; }
 

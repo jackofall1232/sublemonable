@@ -150,12 +150,72 @@ a single pin and no backup.
 
 ## Optional Tor hidden service
 
+The Tor overlay runs a hidden service that forwards onion port 80 to the server
+and, in addition to the API, serves a **static no-JS mirror** (download page,
+checksums, the Android APK) at the root of the `.onion`.
+
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.tor.yml up -d
 docker compose exec tor cat /var/lib/tor/sublemonable/hostname   # your .onion address
 ```
 
-Set `TOR_ENABLED=true` so the server advertises the onion address to clients.
+Then set both in `.env` and restart the server so it picks them up:
+
+```bash
+TOR_ENABLED=true
+ONION_ADDRESS=<the hostname you just read>     # e.g. abcd...xyz.onion
+```
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.tor.yml up -d server
+```
+
+`TOR_ENABLED=true` makes the server advertise the onion address to clients;
+`ONION_ADDRESS` is also what gates the mirror (see below).
+
+### Clearnet + Tor coexist (hybrid)
+
+The clearnet `8443` port stays published, so a hybrid box keeps serving the API
+on clearnet (behind your reverse proxy) **and** over Tor. The static mirror,
+however, is **Host-gated**: the server serves it only when the request `Host` is
+your `ONION_ADDRESS`. This is why `ONION_ADDRESS` must be set — with it empty the
+mirror fails closed and is never served.
+
+| Request reaches the server as… | API | Static APK mirror |
+| --- | --- | --- |
+| `Host: <your>.onion` (via the hidden service) | ✅ served | ✅ served |
+| `Host: relay.example.com` / IP (clearnet) | ✅ served | ❌ 404 — not mounted |
+
+So ordinary clearnet visitors, search engines and IP scanners never see the
+mirror; only traffic arriving through the hidden service does.
+
+### Stage the APK before enabling the mirror
+
+The Android APK and `aab`/keystore artifacts are **never committed to the
+repository** (they are `.gitignore`d). The mirror serves whatever you stage into
+the `onion-site/` directory, which is mounted read-only into the server. Before
+(or after) bringing the hidden service up, stage the release build and a matching
+checksum file:
+
+```bash
+# Copy the release APK you want to distribute into the mirror directory
+cp sublemonable-v1.0.0-beta.apk onion-site/
+
+# Generate a checksum list the mirror serves at /SHA256SUMS
+sha256sum onion-site/*.apk > onion-site/SHA256SUMS
+```
+
+The download page reacts to what is present:
+
+- **APK staged** → the page shows the download button and `sha256sum`
+  verification steps, and `/<file>.apk` is served over Tor.
+- **No APK staged** → the page **hides the download link** and shows operator
+  guidance (where to get the release, how to stage it) instead of dead-linking to
+  a 404. This is the expected state on a fresh clone.
+
+Future APK releases are published separately — re-run the two commands above with
+the new build to update the mirror; no rebuild of the server is required (the
+directory is bind-mounted).
 
 ## Updating
 

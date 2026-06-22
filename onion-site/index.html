@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<!--
+  Sublemonable — Copyright (C) 2026 Sublemonable contributors
+  Licensed under the GNU Affero General Public License v3.0 or later.
+  SPDX-License-Identifier: AGPL-3.0-only
+
+  Static no-JavaScript .onion mirror. No scripts, no trackers, no external
+  resources — every asset is served from this hidden service.
+
+  Served as an html/template by the server (registerOnionMirror): the onion
+  address, APK filename and APK-availability flag are filled in per request. When
+  no APK has been staged into the mirror directory the download section is
+  replaced with operator guidance instead of a dead download link.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Sublemonable — onion mirror</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <header class="masthead">
+    <div class="logo" aria-hidden="true">🍋</div>
+    <h1>Sublemonable</h1>
+    <p class="tagline">End-to-end encrypted messaging — official Tor mirror</p>
+  </header>
+
+  <section class="notice">
+    <p>
+      You are viewing the <strong>official .onion mirror</strong>. It is a
+      static page: <strong>no JavaScript, no trackers, no third-party
+      requests</strong>. Every byte — this page, its stylesheet, the app, the
+      checksums — is served straight from this hidden service over Tor.
+    </p>
+    <p class="addr">
+      Verify you are at the canonical address:<br>
+      <code>{{.OnionAddress}}</code>
+    </p>
+  </section>
+
+  {{if .APKAvailable}}
+  <section>
+    <h2>Download the Android app</h2>
+    <p>
+      A sideloaded build (<code>.apk</code>), ahead of the Play Store release.
+      Android 8.0 (Oreo) or newer.
+    </p>
+    <p>
+      <a class="download" href="/{{.APKName}}" download>
+        Download {{.APKName}}
+      </a>
+      <span class="meta">Android 8.0+ · sideload</span>
+    </p>
+    <p class="warn">
+      This is a pre-release. Expect bugs and data resets between builds. It is
+      not distributed through Google Play and receives no automatic updates —
+      verify every build you install with the checksum below.
+    </p>
+  </section>
+
+  <section>
+    <h2>Verify before you install</h2>
+    <p>
+      Never install an APK you have not verified. After downloading, compute the
+      hash of your copy and confirm it matches the published checksum:
+    </p>
+    <pre><code>sha256sum {{.APKName}}</code></pre>
+    <p>
+      Or verify against the list of checksums in one step:
+    </p>
+    <pre><code>curl -O http://{{.OnionAddress}}/{{.APKName}}
+curl -O http://{{.OnionAddress}}/SHA256SUMS
+sha256sum -c SHA256SUMS</code></pre>
+    <p>
+      Expected output: <code>{{.APKName}}: OK</code>. If the hashes differ,
+      <strong>delete the file and do not install it.</strong> The authoritative
+      list is at <a href="/SHA256SUMS"><code>/SHA256SUMS</code></a>.
+    </p>
+  </section>
+
+  <section>
+    <h2>Installing</h2>
+    <ol>
+      <li>Download the <code>.apk</code> onto your Android device (or transfer it across).</li>
+      <li>Verify its SHA-256 matches <code>/SHA256SUMS</code> as above.</li>
+      <li>
+        Open the file. Android will ask to allow installs from your browser or
+        file manager — grant <em>Install unknown apps</em> for that app
+        (Settings → Apps → Special access → Install unknown apps).
+      </li>
+      <li>Confirm the install. Play Protect may warn you because the app is sideloaded.</li>
+      <li>To update, download a newer build and install over the top — verify its checksum each time.</li>
+    </ol>
+  </section>
+  {{else}}
+  <section>
+    <h2>Android app — not staged on this mirror</h2>
+    <p class="warn">
+      The operator of this mirror has not staged the Android APK yet, so there is
+      no direct download here right now. This is expected on a fresh deployment:
+      the APK is distributed separately and is never committed to the source
+      repository.
+    </p>
+    <ul>
+      <li>
+        Get the release from the official source:
+        <a href="https://github.com/jackofall1232/sublemonable/releases">github.com/jackofall1232/sublemonable/releases</a>,
+        and always verify its SHA-256 before installing.
+      </li>
+      <li>
+        <strong>Operators:</strong> place the released <code>.apk</code> and a
+        matching <code>SHA256SUMS</code> into the <code>onion-site/</code>
+        directory, then the download and verification steps appear here
+        automatically. See the
+        <a href="https://github.com/jackofall1232/sublemonable/blob/main/docs/SELF_HOSTING.md">self-hosting guide</a>.
+      </li>
+    </ul>
+  </section>
+  {{end}}
+
+  <section>
+    <h2>Don't trust us — self-host</h2>
+    <p>
+      The server is a Go binary, a PostgreSQL database, and a Docker Compose
+      file. Run your own relay, including this very onion mirror:
+    </p>
+    <pre><code>git clone https://github.com/jackofall1232/sublemonable.git
+cd sublemonable
+cp server/.env.example .env            # set DATABASE_URL, JWT key paths
+
+# JWT signing keys (mounted into the server container)
+mkdir -p server/keys
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+  -out server/keys/jwt.pem
+openssl rsa -in server/keys/jwt.pem -pubout -out server/keys/jwt.pub.pem
+
+# Stage the release APK + checksums into the mirror (not committed to git):
+cp sublemonable-v1.0.0-beta.apk onion-site/
+sha256sum onion-site/*.apk > onion-site/SHA256SUMS
+
+# Server + Postgres
+docker compose up -d
+
+# Add the Tor hidden service (this mirror is served from it):
+docker compose -f docker-compose.yml -f docker-compose.tor.yml up -d
+
+# Read your own .onion address:
+docker compose exec tor cat /var/lib/tor/sublemonable/hostname</code></pre>
+    <p>
+      Then set <code>TOR_ENABLED=true</code> and <code>ONION_ADDRESS</code> (the
+      hostname you just read) in <code>.env</code> and restart the server so it
+      advertises the onion address to clients and serves this mirror over Tor.
+    </p>
+    <p>
+      The mirror content lives in <code>onion-site/</code> and is mounted
+      read-only into the server, which serves it at the root of the hidden
+      service — and only there. Full instructions — TLS, certificate pinning,
+      environment variables, APK staging, backups — are in the
+      <a href="https://github.com/jackofall1232/sublemonable/blob/main/docs/SELF_HOSTING.md">self-hosting guide</a>.
+    </p>
+  </section>
+
+  <footer>
+    <p>
+      Free software under the
+      <a href="https://github.com/jackofall1232/sublemonable/blob/main/LICENSE">GNU AGPL v3.0</a>.
+      Source: <a href="https://github.com/jackofall1232/sublemonable">github.com/jackofall1232/sublemonable</a>.
+    </p>
+    <p class="muted">No cookies. No logs of you. No JavaScript.</p>
+  </footer>
+</main>
+</body>
+</html>
