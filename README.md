@@ -86,6 +86,19 @@ server, web app, and mobile apps locally.
 Sublemonable is designed to be self-hosted on a small VPS with Docker Compose, including an
 optional Tor hidden service. See [docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
 
+The Tor overlay also serves a static no-JS download mirror at the root of the `.onion`. Two
+operational notes:
+
+- **Hybrid by design.** Clearnet API and the Tor hidden service coexist. The static mirror is
+  Host-gated — it is served only to requests whose `Host` is your `ONION_ADDRESS`, so clearnet
+  visitors and scanners get the API only, never the mirror. Set `ONION_ADDRESS` or the mirror
+  fails closed.
+- **Stage the APK yourself.** Release artifacts (`*.apk`, `*.aab`, keystores) are **not committed**
+  to this repo. Drop the released APK into `onion-site/` and run
+  `sha256sum onion-site/*.apk > onion-site/SHA256SUMS` before enabling the mirror. If no APK is
+  staged, the page hides the download link and shows staging guidance instead of a dead 404. See
+  the [self-hosting guide](docs/SELF_HOSTING.md#stage-the-apk-before-enabling-the-mirror).
+
 ## Contributing
 
 Contributions are welcome — read [CONTRIBUTING.md](CONTRIBUTING.md) first. All contributions must

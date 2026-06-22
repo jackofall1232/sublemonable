@@ -6,6 +6,11 @@
 
   Static no-JavaScript .onion mirror. No scripts, no trackers, no external
   resources — every asset is served from this hidden service.
+
+  Served as an html/template by the server (registerOnionMirror): the onion
+  address, APK filename and APK-availability flag are filled in per request. When
+  no APK has been staged into the mirror directory the download section is
+  replaced with operator guidance instead of a dead download link.
 -->
 <html lang="en">
 <head>
@@ -32,10 +37,11 @@
     </p>
     <p class="addr">
       Verify you are at the canonical address:<br>
-      <code>bc3ug4rjbelyqdil6fza2hg27afzjbcdeykylum3feihbhv6w6zmbzqd.onion</code>
+      <code>{{.OnionAddress}}</code>
     </p>
   </section>
 
+  {{if .APKAvailable}}
   <section>
     <h2>Download the Android app</h2>
     <p>
@@ -43,10 +49,10 @@
       Android 8.0 (Oreo) or newer.
     </p>
     <p>
-      <a class="download" href="/sublemonable-v1.0.0-beta.apk" download>
-        Download sublemonable-v1.0.0-beta.apk
+      <a class="download" href="/{{.APKName}}" download>
+        Download {{.APKName}}
       </a>
-      <span class="meta">28&nbsp;MB · v1.0.0-beta</span>
+      <span class="meta">Android 8.0+ · sideload</span>
     </p>
     <p class="warn">
       This is a pre-release. Expect bugs and data resets between builds. It is
@@ -58,25 +64,20 @@
   <section>
     <h2>Verify before you install</h2>
     <p>
-      Never install an APK you have not verified. The SHA-256 of the authentic
-      build is:
+      Never install an APK you have not verified. After downloading, compute the
+      hash of your copy and confirm it matches the published checksum:
     </p>
-    <pre class="hash"><code>3091c7ae1c88a02fd5bf79033125b23148477c7800392e90a64939e20d2ded10</code></pre>
+    <pre><code>sha256sum {{.APKName}}</code></pre>
     <p>
-      After downloading, compute the hash of your copy and confirm it matches
-      exactly:
+      Or verify against the list of checksums in one step:
     </p>
-    <pre><code>sha256sum sublemonable-v1.0.0-beta.apk</code></pre>
-    <p>
-      Or verify against the signed list of checksums in one step:
-    </p>
-    <pre><code>curl -O http://bc3ug4rjbelyqdil6fza2hg27afzjbcdeykylum3feihbhv6w6zmbzqd.onion/sublemonable-v1.0.0-beta.apk
-curl -O http://bc3ug4rjbelyqdil6fza2hg27afzjbcdeykylum3feihbhv6w6zmbzqd.onion/SHA256SUMS
+    <pre><code>curl -O http://{{.OnionAddress}}/{{.APKName}}
+curl -O http://{{.OnionAddress}}/SHA256SUMS
 sha256sum -c SHA256SUMS</code></pre>
     <p>
-      Expected output: <code>sublemonable-v1.0.0-beta.apk: OK</code>. If the
-      hashes differ, <strong>delete the file and do not install it.</strong>
-      The raw list is at <a href="/SHA256SUMS"><code>/SHA256SUMS</code></a>.
+      Expected output: <code>{{.APKName}}: OK</code>. If the hashes differ,
+      <strong>delete the file and do not install it.</strong> The authoritative
+      list is at <a href="/SHA256SUMS"><code>/SHA256SUMS</code></a>.
     </p>
   </section>
 
@@ -84,7 +85,7 @@ sha256sum -c SHA256SUMS</code></pre>
     <h2>Installing</h2>
     <ol>
       <li>Download the <code>.apk</code> onto your Android device (or transfer it across).</li>
-      <li>Verify its SHA-256 matches the value above.</li>
+      <li>Verify its SHA-256 matches <code>/SHA256SUMS</code> as above.</li>
       <li>
         Open the file. Android will ask to allow installs from your browser or
         file manager — grant <em>Install unknown apps</em> for that app
@@ -94,6 +95,31 @@ sha256sum -c SHA256SUMS</code></pre>
       <li>To update, download a newer build and install over the top — verify its checksum each time.</li>
     </ol>
   </section>
+  {{else}}
+  <section>
+    <h2>Android app — not staged on this mirror</h2>
+    <p class="warn">
+      The operator of this mirror has not staged the Android APK yet, so there is
+      no direct download here right now. This is expected on a fresh deployment:
+      the APK is distributed separately and is never committed to the source
+      repository.
+    </p>
+    <ul>
+      <li>
+        Get the release from the official source:
+        <a href="https://github.com/jackofall1232/sublemonable/releases">github.com/jackofall1232/sublemonable/releases</a>,
+        and always verify its SHA-256 before installing.
+      </li>
+      <li>
+        <strong>Operators:</strong> place the released <code>.apk</code> and a
+        matching <code>SHA256SUMS</code> into the <code>onion-site/</code>
+        directory, then the download and verification steps appear here
+        automatically. See the
+        <a href="https://github.com/jackofall1232/sublemonable/blob/main/docs/SELF_HOSTING.md">self-hosting guide</a>.
+      </li>
+    </ul>
+  </section>
+  {{end}}
 
   <section>
     <h2>Don't trust us — self-host</h2>
@@ -111,6 +137,10 @@ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
   -out server/keys/jwt.pem
 openssl rsa -in server/keys/jwt.pem -pubout -out server/keys/jwt.pub.pem
 
+# Stage the release APK + checksums into the mirror (not committed to git):
+cp sublemonable-v1.0.0-beta.apk onion-site/
+sha256sum onion-site/*.apk > onion-site/SHA256SUMS
+
 # Server + Postgres
 docker compose up -d
 
@@ -122,13 +152,13 @@ docker compose exec tor cat /var/lib/tor/sublemonable/hostname</code></pre>
     <p>
       Then set <code>TOR_ENABLED=true</code> and <code>ONION_ADDRESS</code> (the
       hostname you just read) in <code>.env</code> and restart the server so it
-      advertises the onion address to clients.
+      advertises the onion address to clients and serves this mirror over Tor.
     </p>
     <p>
       The mirror content lives in <code>onion-site/</code> and is mounted
       read-only into the server, which serves it at the root of the hidden
-      service. Full instructions — TLS, certificate pinning, environment
-      variables, backups — are in the
+      service — and only there. Full instructions — TLS, certificate pinning,
+      environment variables, APK staging, backups — are in the
       <a href="https://github.com/jackofall1232/sublemonable/blob/main/docs/SELF_HOSTING.md">self-hosting guide</a>.
     </p>
   </section>
