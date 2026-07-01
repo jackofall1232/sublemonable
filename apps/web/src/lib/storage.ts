@@ -85,10 +85,31 @@ export const IMAGE_BYTES = HEADER_BYTES + SLOT_TABLE_BYTES + SLOT_COUNT * SLOT_P
 // names nothing about slot position, vault count, or "decoy" status.
 const PAYLOAD_AD = utf8Encode("Sublemonable-Vault-Payload-v1");
 
-/** Handle to an unlocked vault: its data key and which slot it occupies. */
+/**
+ * Handle to an unlocked vault: its data key, which slot it occupies, and that
+ * slot's on-disk identity (salt ‖ wrapped key) at unlock time. Mutations
+ * verify the identity first — a slot index alone is not ownership: another
+ * tab can destroy this vault and seal a NEW vault into the same index, and a
+ * stale session writing by index would corrupt it.
+ */
 export interface VaultSession {
   vaultKey: Uint8Array;
   slotIndex: number;
+  slotEntry: Uint8Array;
+}
+
+function slotEntryOf(slot: KeySlot): Uint8Array {
+  const out = new Uint8Array(SLOT_ENTRY_BYTES);
+  out.set(slot.salt, 0);
+  out.set(slot.wrapped, SALT_BYTES);
+  return out;
+}
+
+function sameSlotEntry(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
+  return diff === 0;
 }
 
 /** The image in structured form. `payloads[i]` belongs to `slots[i]`. */
@@ -361,7 +382,7 @@ export function createVault(passphrase: string, keyStore: KeyStore): Promise<Vau
 
     payloads[slotIndex] = await sealPayload(vaultKey, keyStore);
     await saveImageBytes(encodeImage({ slots, payloads }));
-    return { vaultKey, slotIndex };
+    return { vaultKey, slotIndex, slotEntry: slotEntryOf(slots[slotIndex]!) };
   });
 }
 
@@ -387,7 +408,14 @@ export async function unlockVault(
     wipe(unlocked.vaultKey);
     throw e;
   }
-  return { keyStore, session: { vaultKey: unlocked.vaultKey, slotIndex: unlocked.slotIndex } };
+  return {
+    keyStore,
+    session: {
+      vaultKey: unlocked.vaultKey,
+      slotIndex: unlocked.slotIndex,
+      slotEntry: slotEntryOf(image.slots[unlocked.slotIndex]!),
+    },
+  };
 }
 
 /** Re-seal and write the session's keystore into its payload region. All other
@@ -397,6 +425,12 @@ export function persistVault(session: VaultSession, keyStore: KeyStore): Promise
     const bytes = await loadImageBytes();
     if (!bytes) throw new Error("no vault image");
     const image = decodeImage(bytes);
+    // The slot must still be OURS. Another realm may have destroyed this
+    // vault and sealed a new one into the same index; writing our payload
+    // there would corrupt it.
+    if (!sameSlotEntry(slotEntryOf(image.slots[session.slotIndex]!), session.slotEntry)) {
+      throw new Error("vault slot changed on disk");
+    }
     image.payloads[session.slotIndex] = await sealPayload(session.vaultKey, keyStore);
     await saveImageBytes(encodeImage(image));
   });
@@ -414,6 +448,12 @@ export function destroyVaultSlot(session: VaultSession): Promise<void> {
       const bytes = await loadImageBytes();
       if (!bytes) return;
       const image = decodeImage(bytes);
+      // If the slot no longer matches this session, our vault is already
+      // gone and the index now belongs to someone else — randomizing it
+      // would destroy THEIR vault. Destroy is idempotent: nothing to do.
+      if (!sameSlotEntry(slotEntryOf(image.slots[session.slotIndex]!), session.slotEntry)) {
+        return;
+      }
       image.slots[session.slotIndex] = await randomSlot();
       image.payloads[session.slotIndex] = randomPayload();
       await saveImageBytes(encodeImage(image));

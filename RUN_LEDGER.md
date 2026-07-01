@@ -192,8 +192,14 @@ triaged against the code and either fixed or answered on the PR):
 `resetDevice()` tears down sockets/decoy/state before erasing the image; the
 IDB upgrade awaits the legacy delete; the two-vault test actually stores two
 vaults; `lock()` retires the vault key behind pending persists
-(`retireVaultSession`); image mutations take a cross-tab Web Lock; and the
-desktop legacy purge was reverted as unsafe (see item 4 above).
+(`retireVaultSession`); image mutations take a cross-tab Web Lock; the
+desktop legacy purge was reverted as unsafe (see item 4 above); vault
+sessions are bound to their slot's on-disk identity (salt ‖ wrapped key),
+so a stale session in another tab can never persist into — or destroy — a
+slot that has since been re-keyed (persist fails, destroy no-ops; verified
+in-browser with forged and genuinely-stale sessions); and `deleteAccount`
+tears down app state unconditionally, so a failed local slot overwrite can
+no longer strand a dead "ready" session after the server account is gone.
 
 ## Known limitations / follow-ups (non-blocking)
 
