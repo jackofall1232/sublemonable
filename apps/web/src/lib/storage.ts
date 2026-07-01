@@ -203,13 +203,17 @@ export async function sealPayload(vaultKey: Uint8Array, keyStore: KeyStore): Pro
  *  key/payload mismatch (GCM tag failure). */
 export async function openPayload(vaultKey: Uint8Array, payload: Uint8Array): Promise<KeyStore> {
   const padded = await aeadDecrypt(vaultKey, payload, PAYLOAD_AD);
+  // unpad() returns a copy, so BOTH buffers hold keystore plaintext — wipe
+  // both in the finally so no throw path (unpad, JSON.parse, version check)
+  // can leave decrypted material lingering in memory.
+  let plaintext: Uint8Array | null = null;
   try {
-    const plaintext = unpad(padded);
+    plaintext = unpad(padded);
     const parsed = JSON.parse(utf8Decode(plaintext)) as KeyStore;
-    wipe(plaintext);
     if (parsed.version !== 1) throw new Error("unsupported keystore version");
     return parsed;
   } finally {
+    if (plaintext) wipe(plaintext);
     wipe(padded);
   }
 }
