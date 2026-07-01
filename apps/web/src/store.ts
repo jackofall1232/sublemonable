@@ -700,18 +700,24 @@ export const useApp = create<AppState>((set, get) => {
       // exact size and shape — other vaults (if any) are untouched, and the
       // deletion leaves no trace that a vault was ever here.
       const { vault } = get();
-      if (vault) await destroyVaultSlot(vault);
-      set({
-        phase: "setup",
-        keyStore: null,
-        vault: null,
-        accountId: null,
-        accessToken: null,
-        refreshToken: null,
-        contacts: {},
-        messages: {},
-        activePeer: null,
-      });
+      try {
+        if (vault) await destroyVaultSlot(vault);
+      } finally {
+        // The server account is already gone and destroyVaultSlot wiped the
+        // key even on failure — staying in "ready" would strand a dead
+        // session, so the teardown must run unconditionally.
+        set({
+          phase: "setup",
+          keyStore: null,
+          vault: null,
+          accountId: null,
+          accessToken: null,
+          refreshToken: null,
+          contacts: {},
+          messages: {},
+          activePeer: null,
+        });
+      }
     },
 
     async resetDevice() {
