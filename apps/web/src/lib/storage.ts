@@ -262,16 +262,27 @@ function db(): Promise<IDBPDatabase> {
 //     that failed (or another tab's write) can never leave memory claiming
 //     state the disk doesn't have — e.g. a vault destroy that never landed, or
 //     a destroyed vault resurrected from a stale snapshot.
-//  2. Mutations serialize through `withImageLock`, so an in-flight persist can
-//     never interleave with a destroy and write back a pre-destroy slot table.
+//  2. Mutations serialize through `withImageLock`: a promise chain within this
+//     realm, plus a Web Lock across realms, so a persist in one tab can never
+//     interleave with a persist/destroy in another and write back a stale copy
+//     of the other slot's payload. (Tauri is a single webview; the realm chain
+//     alone covers it, and navigator.locks is used there too when present.)
 //
 // Cost: ~1 MiB backend read per persist — single-digit milliseconds on
 // IndexedDB, acceptable on the Tauri invoke path.
 
+const IMAGE_LOCK = "sublemonable-vault-image";
+
 let imageOp: Promise<unknown> = Promise.resolve();
 
 function withImageLock<T>(fn: () => Promise<T>): Promise<T> {
-  const run = imageOp.then(fn, fn);
+  // lib.dom types LockManager.request without flowing the callback's return
+  // type through, hence the cast.
+  const locked = (): Promise<T> =>
+    typeof navigator !== "undefined" && navigator.locks
+      ? (navigator.locks.request(IMAGE_LOCK, fn) as Promise<T>)
+      : fn();
+  const run = imageOp.then(locked, locked);
   imageOp = run.catch(() => undefined);
   return run;
 }
@@ -286,14 +297,15 @@ async function loadImageBytes(): Promise<Uint8Array | null> {
     raw = value instanceof Uint8Array ? value : null;
   }
   // Anything that isn't exactly a current-version image is treated as absent,
-  // never parsed. On desktop that means a stale pre-migration single-blob
-  // keystore — purge it on sight (the analog of the IDB v2 upgrade delete):
-  // left in place it would prove a pre-migration vault existed and leak the
-  // old keystore's size through its variable length.
-  if (!raw || raw.length !== IMAGE_BYTES || raw[0] !== IMAGE_VERSION) {
-    if (raw && isTauri()) await tauriInvoke("delete_vault");
-    return null;
-  }
+  // never parsed. On desktop that leaves a stale pre-migration single-blob
+  // keystore at rest, which we deliberately do NOT purge from here:
+  // delete_vault clears BOTH Rust backends (Secret Service and the file
+  // fallback), so a blind purge of an invalid Secret Service blob could
+  // destroy a valid image living in the file fallback. A safe purge needs a
+  // per-backend delete on the Rust side — tracked as a desktop follow-up. The
+  // stale blob is overwritten naturally the next time a vault is created on
+  // the active backend.
+  if (!raw || raw.length !== IMAGE_BYTES || raw[0] !== IMAGE_VERSION) return null;
   return raw;
 }
 
@@ -409,6 +421,17 @@ export function destroyVaultSlot(session: VaultSession): Promise<void> {
       wipe(session.vaultKey);
     }
   });
+}
+
+/**
+ * Queue a vault-key wipe behind every already-queued image mutation. lock()
+ * must retire the key this way rather than wiping in place: an in-flight
+ * persist seals with this exact Uint8Array, and zeroing it mid-queue would
+ * drop the mutation (sealPayload fails closed on a wiped key) after its side
+ * effects — an advanced ratchet, a sent message — already happened.
+ */
+export function retireVaultSession(session: VaultSession): Promise<void> {
+  return withImageLock(async () => wipe(session.vaultKey));
 }
 
 /** Panic wipe: delete the entire image — every vault, real or filler. */

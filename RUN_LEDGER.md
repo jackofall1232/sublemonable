@@ -18,7 +18,7 @@ version(1) ‖ SLOT_COUNT × [salt(16) ‖ wrapped key(60)] ‖ SLOT_COUNT × pa
 ```
 
 - **Fixed-size padded per-slot payloads.** A real payload is the vault's keystore
-  JSON padded to the region's full plaintext capacity and *then* AES-256-GCM
+  JSON padded to the region's full plaintext capacity and _then_ AES-256-GCM
   encrypted under the vault key (pad-then-encrypt — the length prefix lives inside
   the ciphertext; padding after encryption would have put a plaintext length field
   on disk and statistically distinguished real slots from filler, leaking the count).
@@ -43,19 +43,27 @@ version(1) ‖ SLOT_COUNT × [salt(16) ‖ wrapped key(60)] ‖ SLOT_COUNT × pa
   impact.
 - **Concurrency:** all image mutations (`createVault` / `persistVault` /
   `destroyVaultSlot` / `destroyVaultImage`) serialize through a promise-chain
-  lock, and there is NO in-memory image cache — every operation reads the
-  backend fresh. This closes two real bugs the audit surfaced: an in-flight
-  persist interleaving with a destroy could have written a pre-destroy slot
-  table back to disk (resurrecting a "destroyed" vault), and a failed backend
-  write (or another tab's write) could have left memory claiming state the disk
-  didn't have.
+  lock within the realm plus a Web Lock (`navigator.locks`) across tabs, and
+  there is NO in-memory image cache — every operation reads the backend fresh.
+  This closes three real bugs review surfaced: an in-flight persist
+  interleaving with a destroy could have written a pre-destroy slot table back
+  to disk (resurrecting a "destroyed" vault); a failed backend write could
+  have left memory claiming state the disk didn't have; and two tabs holding
+  different vaults could have clobbered each other's payload regions through
+  unserialized whole-image read-modify-write. `lock()` retires the vault key
+  through the same queue (`retireVaultSession`) so wiping never drops an
+  in-flight persist whose side effects already happened.
 - **Hardening:** `sealPayload` refuses an all-zero (wiped) vault key — checked
   both before AND after the encrypt, closing the TOCTOU window — so a `lock()`
   racing an in-flight `persist()` fails loudly instead of silently sealing the
   keystore under a dead key (permanent vault loss). `unlockVault` wipes the
-  unlocked key if the payload fails to open. On desktop, a stale pre-migration
-  single-blob keystore is purged on sight (the analog of the IDB v2 upgrade
-  delete) instead of lingering as a forensic artifact.
+  unlocked key if the payload fails to open. On desktop, a stale
+  pre-migration single-blob keystore is treated as absent and never parsed,
+  but deliberately NOT blind-purged from the web layer: `delete_vault` clears
+  BOTH Rust backends, so purging an invalid Secret Service blob could destroy
+  a valid image in the file fallback (Codex review, P1). A safe purge needs a
+  per-backend delete on the Rust side — logged as a desktop follow-up; the
+  stale blob is overwritten naturally on the next vault creation.
 
 ### `apps/web/src/store.ts` — rewired
 
@@ -85,7 +93,7 @@ version(1) ‖ SLOT_COUNT × [salt(16) ‖ wrapped key(60)] ‖ SLOT_COUNT × pa
   creating a new vault into an existing image), and an honest note on the one
   timing residue (post-decrypt JSON parsing scales with vault contents —
   milliseconds against seconds of fixed KDF work).
-- **Watermark tradeoff documented** (per DoD), and documented *truthfully*: the
+- **Watermark tradeoff documented** (per DoD), and documented _truthfully_: the
   audit caught that `ChatView.tsx:71` passes the conversation **peer's UUID**
   into the watermark's messageId field, so a lossless capture exposes BOTH
   parties' account UUIDs and binds the two accounts to one conversation — one
@@ -157,7 +165,12 @@ Confirmed and **fixed** in this branch:
    every operation reads the backend fresh.
 4. **[medium] Desktop legacy blob never purged** — no analog of the IDB v2
    upgrade delete on Tauri; a variable-size pre-migration keystore lingered as
-   a forensic artifact. Fixed: purge on sight in `loadImageBytes`.
+   a forensic artifact. Initially fixed with a purge-on-sight in
+   `loadImageBytes`, then **deliberately reverted** after Codex review (P1)
+   showed the purge could destroy a valid file-fallback image (`delete_vault`
+   clears both Rust backends and Secret Service shadows the file fallback on
+   read). The legacy blob is treated as absent and never parsed; a safe purge
+   needs a per-backend delete on the Rust side — desktop follow-up.
 5. **[medium] unlock() masked login failures as "Wrong passphrase"** and left
    decrypted key material in state behind the lock screen. Fixed: honest error,
    state cleared, vault key wiped.
@@ -173,10 +186,24 @@ vault" (downgrade scenarios out of scope); createAccount registers the server
 account before the vault persists (pre-existing ordering, orphaned server
 account is recoverable server-side).
 
+**Post-PR review rounds** (gemini-code-assist, Copilot, Codex — all findings
+triaged against the code and either fixed or answered on the PR):
+`openPayload` now wipes the decrypted plaintext on every exit path;
+`resetDevice()` tears down sockets/decoy/state before erasing the image; the
+IDB upgrade awaits the legacy delete; the two-vault test actually stores two
+vaults; `lock()` retires the vault key behind pending persists
+(`retireVaultSession`); image mutations take a cross-tab Web Lock; and the
+desktop legacy purge was reverted as unsafe (see item 4 above).
+
 ## Known limitations / follow-ups (non-blocking)
 
 - **Desktop invoke transport:** the image crosses Tauri IPC as `number[]` JSON
   (~4 MB serialized per persist). Works; binary IPC is a follow-up optimization.
+- **Desktop keystore backends (Rust follow-up):** `load_vault` prefers Secret
+  Service and can shadow a valid file-fallback image; `delete_vault` clears
+  both backends. Needed: per-backend purge + prefer whichever backend holds a
+  valid current-size image, so the web layer can safely purge stale
+  pre-migration blobs (currently left at rest, never parsed).
 - **Slot capacity:** 256 KiB per payload (~262 KB plaintext). `sealPayload` throws
   a clear error if a keystore ever outgrows it; a tier-growth scheme (grow ALL
   regions together, preserving count-unknowability) is the designed escape hatch.

@@ -65,6 +65,7 @@ import {
   destroyVaultSlot,
   hasVault,
   persistVault,
+  retireVaultSession,
   unlockVault,
   type VaultSession,
 } from "./lib/storage.js";
@@ -740,9 +741,12 @@ export const useApp = create<AppState>((set, get) => {
     lock() {
       stopDecoy();
       get().ws?.close();
-      // Drop key material and decrypted messages from memory.
+      // Drop key material and decrypted messages from memory. The key wipe is
+      // queued behind any in-flight persist (which seals with this very
+      // buffer) so locking never drops a mutation whose side effects — an
+      // advanced ratchet, a sent message — already happened.
       const { vault } = get();
-      if (vault) wipe(vault.vaultKey);
+      if (vault) void retireVaultSession(vault);
       set({
         phase: "unlock",
         keyStore: null,
