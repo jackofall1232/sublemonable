@@ -54,8 +54,11 @@ The server's role is reduced to three functions:
 
 ## Key generation and storage per platform
 
-- **Web:** Keys live in IndexedDB, encrypted with AES-256-GCM. The master key is derived from the
-  user's passphrase via Argon2id (memory 65536 KB, iterations 3). Note: `libsodium.js` uses an
+- **Web:** Keys live inside the multi-vault image — a single fixed-size record in IndexedDB (see
+  the plausible-deniability section below for the on-disk layout). Each vault's keystore is padded
+  to a constant payload size and encrypted with AES-256-GCM under that vault's random key; the
+  vault key is unwrapped from a key slot whose per-slot master key is derived from the user's
+  passphrase via Argon2id (memory 65536 KB, iterations 3). Note: `libsodium.js` uses an
   internal Argon2id parallelism of 1 and exposes no lane parameter, so the web client cannot honor
   the spec's `parallelism: 4` literally; the value is applied consistently across all web
   derivations, and native clients use the spec value. Keys exist in plaintext only in memory while
@@ -119,6 +122,27 @@ purged after 7 days.
 The web client additionally embeds an **invisible watermark** (canvas steganography encoding
 `recipient_id` + timestamp into message backgrounds) so a leaked screenshot can be attributed to
 the recipient who leaked it.
+
+**Watermark tradeoff (deliberate).** The watermark cuts against the rest of the metadata-minimization
+design, and we keep it anyway — with eyes open:
+
+- It embeds the viewing account's UUID, the conversation peer's account UUID, and a timestamp into
+  the chat background — one watermark per conversation view, not per message. The encoding is
+  public (this is open source), so _anyone_ holding a lossless capture — not just the sender — can
+  extract **both** parties' account UUIDs and bind the two accounts to one conversation at a point
+  in time. That is identifying, linking material deliberately added to otherwise identifier-free
+  content: a leaked capture is evidence of the very account-to-account association the rest of the
+  design denies the server.
+- It only survives lossless captures: LSB steganography is destroyed by JPEG recompression, resizing,
+  or re-photographing a screen. It deters casual screenshot leaks; it does not stop a determined
+  leaker, who can trivially strip it.
+- The exposure is bounded in one dimension only: account UUIDs are pseudonymous (no phone/email/name
+  behind them), and they appear only in captures of content the leaking party could already see.
+
+We judge leak attribution — a sender being able to prove _which_ counterparty's screen a capture
+came from — worth that exposure. Users for whom any embedded identifier, or any capturable proof
+that two accounts converse, is unacceptable should weigh this before relying on the web client for
+content they may be compelled to defend.
 
 ## Metadata minimization
 
@@ -218,9 +242,35 @@ There is no cryptographic evidence that a second vault exists.
 - **Independence.** Each vault has its own random vault key and its own server account, identity key,
   and prekey bundle. The server cannot link them. Decrypted vault contents live in memory only and
   are zeroed on background.
+- **On-disk image.** Everything at rest is ONE fixed-size byte image stored under a single
+  IndexedDB key (or handed as one opaque blob to the desktop keystore adapter):
+  `version(1) ‖ SLOT_COUNT × [salt(16) ‖ wrapped key(60)] ‖ SLOT_COUNT × payload(256 KiB)`. Every
+  payload region is exactly the same size whether it holds a real vault or filler. A real payload
+  is the vault's keystore padded to the region's full plaintext capacity and **then** encrypted
+  (pad-then-encrypt — the length prefix sits inside the AEAD ciphertext, so no plaintext structure
+  ever reaches disk); a filler payload is uniform CSPRNG output, indistinguishable from ciphertext.
+  The image size is a compile-time constant regardless of vault count. Deleting a vault overwrites
+  its slot and payload with fresh random bytes — the image never shrinks, moves, or records that a
+  vault was ever there. Because every payload region is the same size, unlocking any vault performs
+  identical cryptographic work (per-slot Argon2id and a constant-size payload decrypt), preserving
+  the timing-parity contract. The one residue: post-decrypt JSON parsing of the winning vault scales
+  with its contents — low single-digit milliseconds against seconds of fixed KDF work, and it occurs
+  only after the vault is already being opened for display.
 
 This mirrors the VeraCrypt hidden-volume legal model: a user compelled to reveal passphrase A opens
 a real, working profile while revealing nothing about whether passphrase B exists.
+
+Two VeraCrypt-analogous caveats apply, and are accepted deliberately:
+
+- **Multi-snapshot diffing.** An adversary who images the disk at two points in time can see which
+  slot's payload region changed between snapshots, revealing that _that slot_ is live. A single
+  snapshot — the compelled-disclosure scenario the design targets — reveals nothing. This is the
+  same bound VeraCrypt hidden volumes accept.
+- **Blind overwrite on vault creation.** Which slots hold live vaults is unknowable from storage —
+  that is the point — so creating a new vault into an existing image picks a random slot and can
+  destroy a vault whose passphrase is not currently entered, exactly as writing to a VeraCrypt
+  outer volume without mounting the hidden one can. Creating a vault on a device that may hold
+  others is a deliberate, documented risk.
 
 ### Tor-first network
 

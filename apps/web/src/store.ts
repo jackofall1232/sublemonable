@@ -4,18 +4,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Application state + messaging service. Decrypted messages live in memory
-// only — nothing content-bearing is ever persisted. The keystore persists as
-// a single AES-256-GCM blob in IndexedDB.
+// only — nothing content-bearing is ever persisted. The keystore persists
+// inside the fixed-size multi-vault image (see lib/storage.ts): padded to a
+// constant payload size and AES-256-GCM-encrypted under this vault's key.
 
 import {
-  decryptKeyStore,
-  deriveKeyFromPassword,
-  encryptKeyStore,
   fromBase64,
   generateDropToken,
   generateIdentityKeyPair,
   generateOneTimePrekeys,
-  generateSalt,
   generateSignedPrekey,
   identityKeyToX25519,
   openSealed,
@@ -30,6 +27,7 @@ import {
   unpad,
   utf8Decode,
   utf8Encode,
+  wipe,
   x3dhInitiate,
   x3dhRespond,
   type KeyStore,
@@ -61,7 +59,15 @@ import {
   type SerializedSession,
   type SerializedSignedPrekey,
 } from "./lib/serialization.js";
-import { destroyVault, loadVault, saveVault } from "./lib/storage.js";
+import {
+  createVault,
+  destroyVaultImage,
+  destroyVaultSlot,
+  hasVault,
+  persistVault,
+  unlockVault,
+  type VaultSession,
+} from "./lib/storage.js";
 import { WsClient, type WsStatus } from "./lib/ws.js";
 
 export interface ContactRecord {
@@ -93,8 +99,7 @@ interface AppState {
   unlockError?: string;
   accountId: string | null;
   keyStore: KeyStore | null;
-  masterKey: Uint8Array | null;
-  salt: Uint8Array | null;
+  vault: VaultSession | null;
   accessToken: string | null;
   refreshToken: string | null;
   ws: WsClient | null;
@@ -124,6 +129,10 @@ interface AppState {
   markVerified: (peerId: string) => Promise<void>;
   getSafetyNumber: (peerId: string) => Promise<string>;
   deleteAccount: () => Promise<void>;
+  /** Erase the entire vault image — every vault, real or filler — and return to
+   *  setup. The recovery path from the unlock screen (a forgotten passphrase
+   *  and an all-filler image are indistinguishable, by design). */
+  resetDevice: () => Promise<void>;
   lock: () => void;
 }
 
@@ -131,10 +140,10 @@ export const useApp = create<AppState>((set, get) => {
   // ── internals ──────────────────────────────────────────────────────────────
 
   const persist = async (): Promise<void> => {
-    const { keyStore, masterKey, salt, contacts } = get();
-    if (!keyStore || !masterKey || !salt) return;
+    const { keyStore, vault, contacts } = get();
+    if (!keyStore || !vault) return;
     keyStore.sessions = contacts as unknown as Record<string, unknown>;
-    await saveVault(salt, await encryptKeyStore(masterKey, keyStore));
+    await persistVault(vault, keyStore);
   };
 
   const login = async (): Promise<void> => {
@@ -398,8 +407,7 @@ export const useApp = create<AppState>((set, get) => {
     phase: "loading",
     accountId: null,
     keyStore: null,
-    masterKey: null,
-    salt: null,
+    vault: null,
     accessToken: null,
     refreshToken: null,
     ws: null,
@@ -409,8 +417,7 @@ export const useApp = create<AppState>((set, get) => {
     activePeer: null,
 
     async bootstrap() {
-      const vault = await loadVault();
-      set({ phase: vault ? "unlock" : "setup" });
+      set({ phase: (await hasVault()) ? "unlock" : "setup" });
     },
 
     async createAccount(passphrase) {
@@ -428,8 +435,6 @@ export const useApp = create<AppState>((set, get) => {
         one_time_prekeys: oneTimePrekeys.map((p) => ({ id: p.id, public_key: b64(p.publicKey) })),
       });
 
-      const salt = await generateSalt();
-      const masterKey = await deriveKeyFromPassword(passphrase, salt);
       const keyStore: KeyStore = {
         version: 1,
         accountId: account_id,
@@ -443,26 +448,32 @@ export const useApp = create<AppState>((set, get) => {
         sessions: {},
         verifiedContacts: {},
       };
-      set({ keyStore, masterKey, salt, accountId: account_id, contacts: {} });
-      await persist();
+      // Seals the keystore into its slot and persists the image in one step.
+      const vault = await createVault(passphrase, keyStore);
+      set({ keyStore, vault, accountId: account_id, contacts: {} });
       await login();
       connect();
       set({ phase: "ready" });
     },
 
     async unlock(passphrase) {
-      const vault = await loadVault();
-      if (!vault) {
+      if (!(await hasVault())) {
         set({ phase: "setup" });
         return;
       }
+      // Off-thread tryPassphrase: every slot derived and tried, no early exit.
+      // A corrupt payload throws and is shown as a wrong passphrase — a
+      // clobbered vault must stay indistinguishable from a bad guess.
+      const unlocked = await unlockVault(passphrase).catch(() => null);
+      if (!unlocked) {
+        set({ unlockError: "Wrong passphrase" });
+        return;
+      }
+      const { keyStore, session } = unlocked;
       try {
-        const masterKey = await deriveKeyFromPassword(passphrase, vault.salt);
-        const keyStore = await decryptKeyStore(masterKey, vault.blob);
         set({
           keyStore,
-          masterKey,
-          salt: vault.salt,
+          vault: session,
           accountId: keyStore.accountId,
           contacts: keyStore.sessions as unknown as Record<string, ContactRecord>,
           unlockError: undefined,
@@ -471,7 +482,17 @@ export const useApp = create<AppState>((set, get) => {
         connect();
         set({ phase: "ready" });
       } catch {
-        set({ unlockError: "Wrong passphrase" });
+        // The vault opened but the relay is unreachable. Don't claim the
+        // passphrase was wrong, and don't leave key material sitting behind
+        // the lock screen.
+        wipe(session.vaultKey);
+        set({
+          keyStore: null,
+          vault: null,
+          accountId: null,
+          contacts: {},
+          unlockError: "Unlocked, but the server is unreachable — try again",
+        });
       }
     },
 
@@ -674,12 +695,15 @@ export const useApp = create<AppState>((set, get) => {
       await api.deleteAccount(token);
       stopDecoy();
       get().ws?.close();
-      await destroyVault();
+      // Turn this vault's slot back into random filler. The image keeps its
+      // exact size and shape — other vaults (if any) are untouched, and the
+      // deletion leaves no trace that a vault was ever here.
+      const { vault } = get();
+      if (vault) await destroyVaultSlot(vault);
       set({
         phase: "setup",
         keyStore: null,
-        masterKey: null,
-        salt: null,
+        vault: null,
         accountId: null,
         accessToken: null,
         refreshToken: null,
@@ -689,14 +713,21 @@ export const useApp = create<AppState>((set, get) => {
       });
     },
 
+    async resetDevice() {
+      await destroyVaultImage();
+      set({ phase: "setup", unlockError: undefined });
+    },
+
     lock() {
       stopDecoy();
       get().ws?.close();
       // Drop key material and decrypted messages from memory.
+      const { vault } = get();
+      if (vault) wipe(vault.vaultKey);
       set({
         phase: "unlock",
         keyStore: null,
-        masterKey: null,
+        vault: null,
         accessToken: null,
         refreshToken: null,
         messages: {},
