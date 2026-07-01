@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  addVaultSlot,
   createVaultSlots,
   randomBytes,
   randomSlot,
@@ -140,18 +141,35 @@ describe("payload sealing", () => {
 describe("end-to-end image unlock (sans worker/IndexedDB)", () => {
   it("stores two vaults in one image; each passphrase opens only its own keystore", async () => {
     const first = await createVaultSlots("alpha passphrase", fastDeriver);
+    const second = await addVaultSlot(
+      first.slots,
+      new Set([first.slotIndex]),
+      "bravo passphrase",
+      fastDeriver,
+    );
     const payloads: Uint8Array[] = [];
     for (let i = 0; i < SLOT_COUNT; i++) payloads.push(randomPayload());
 
     const alphaStore = keyStoreFixture("alpha-sessions");
+    const bravoStore = keyStoreFixture("bravo-sessions");
     payloads[first.slotIndex] = await sealPayload(first.vaultKey, alphaStore);
-    const image = decodeImage(encodeImage({ slots: first.slots, payloads }));
+    payloads[second.slotIndex] = await sealPayload(second.vaultKey, bravoStore);
+    const image = decodeImage(encodeImage({ slots: second.slots, payloads }));
 
     // Unlock exactly as unlockVault does, minus the Worker shell.
-    const unlocked = await tryPassphrase("alpha passphrase", image.slots, fastDeriver);
-    expect(unlocked).not.toBeNull();
-    const opened = await openPayload(unlocked!.vaultKey, image.payloads[unlocked!.slotIndex]!);
-    expect(opened).toEqual(alphaStore);
+    const alpha = await tryPassphrase("alpha passphrase", image.slots, fastDeriver);
+    const bravo = await tryPassphrase("bravo passphrase", image.slots, fastDeriver);
+    expect(alpha).not.toBeNull();
+    expect(bravo).not.toBeNull();
+    expect(alpha!.slotIndex).not.toBe(bravo!.slotIndex);
+    expect(await openPayload(alpha!.vaultKey, image.payloads[alpha!.slotIndex]!)).toEqual(
+      alphaStore,
+    );
+    expect(await openPayload(bravo!.vaultKey, image.payloads[bravo!.slotIndex]!)).toEqual(
+      bravoStore,
+    );
+    // Cross-keying never works: alpha's key cannot open bravo's payload.
+    await expect(openPayload(alpha!.vaultKey, image.payloads[bravo!.slotIndex]!)).rejects.toThrow();
 
     expect(await tryPassphrase("wrong passphrase", image.slots, fastDeriver)).toBeNull();
   });

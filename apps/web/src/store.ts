@@ -714,8 +714,27 @@ export const useApp = create<AppState>((set, get) => {
     },
 
     async resetDevice() {
+      // Normally reached only from the locked gate, but tear everything down
+      // anyway — a device reset must never leave decrypted state in memory or
+      // a socket/decoy scheduler running, whatever state it was called from.
+      stopDecoy();
+      get().ws?.close();
+      const { vault } = get();
+      if (vault) wipe(vault.vaultKey);
       await destroyVaultImage();
-      set({ phase: "setup", unlockError: undefined });
+      set({
+        phase: "setup",
+        unlockError: undefined,
+        keyStore: null,
+        vault: null,
+        accountId: null,
+        accessToken: null,
+        refreshToken: null,
+        ws: null,
+        contacts: {},
+        messages: {},
+        activePeer: null,
+      });
     },
 
     lock() {

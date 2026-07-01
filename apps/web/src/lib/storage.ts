@@ -241,11 +241,13 @@ let dbPromise: Promise<IDBPDatabase> | null = null;
 
 function db(): Promise<IDBPDatabase> {
   dbPromise ??= openDB(DB_NAME, 2, {
-    upgrade(database, oldVersion, _newVersion, tx) {
+    async upgrade(database, oldVersion, _newVersion, tx) {
       if (oldVersion < 1) database.createObjectStore(STORE);
       // v1 stored a single-blob keystore. That model is gone — purge the
-      // record so no fallback path can ever read it.
-      if (oldVersion === 1) void tx.objectStore(STORE).delete(LEGACY_KEY);
+      // record so no fallback path can ever read it. Awaited so a failed
+      // delete fails the upgrade deterministically instead of surfacing as
+      // an unhandled rejection.
+      if (oldVersion === 1) await tx.objectStore(STORE).delete(LEGACY_KEY);
     },
   });
   return dbPromise;
