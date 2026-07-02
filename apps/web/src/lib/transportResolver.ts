@@ -9,7 +9,7 @@ import { CLEARNET_WARNING, type TransportResolution } from "@sublemonable/protoc
  * Resolves the active transport by probing in a fixed fallback-chain order —
  * this is not user-selectable (see docs/TOR_ARCHITECTURE.md):
  *
- *   1. I2P      (skeleton — always fails in v1.5, logs intent)
+ *   1. I2P      (skeleton — always fails in v1.5)
  *   2. Tor      (detected by .onion hostname or Tauri proxy probe)
  *   3. Clearnet (last resort — always succeeds unless offline / fallback disabled)
  *

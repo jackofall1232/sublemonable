@@ -5,8 +5,8 @@
 
 /**
  * Clearnet-fallback warning banner (v1.5). Shown whenever the live transport is
- * `clearnet_fallback` — Tor (and, in future, I2P) was unavailable and the app
- * connected over plain HTTPS/WSS instead.
+ * `clearnet_fallback` — I2P and Tor were both unavailable and the app connected
+ * over plain HTTPS/WSS instead.
  *
  * Honest, not alarmist: the user implicitly allowed fallback by leaving it
  * enabled, so this is an amber informative banner (not a red modal). It is
@@ -64,9 +64,7 @@ export function ClearnetWarningBanner({
         <line x1="2.5" y1="2" x2="13.5" y2="14" />
       </svg>
       <span style={{ flex: 1 }}>
-        <strong style={{ color: color.semantic.textPrimary }}>
-          Tor unavailable — connected via clearnet.
-        </strong>{" "}
+        <strong style={{ color: color.semantic.textPrimary }}>Clearnet fallback active.</strong>{" "}
         {reason ?? "Your IP may be visible to the relay."}
       </span>
       <button
