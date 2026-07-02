@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "project_name": "sublemonable",
+  "current_goal": "Fix the relay transport hierarchy to I2P-primary/Tor-fallback/clearnet-last-resort, verify RELAY_ONION_ADDRESS build injection across platforms, and set up l00prite memory",
+  "current_phase": "implemented",
+  "active_agent": null,
+  "last_agent": "claude",
+  "last_updated": null,
+  "status": "in_progress",
+  "blocked": false,
+  "blocker_reason": null,
+  "active_event_id": null,
+  "last_event_processed": null,
+  "pending_event_count": 0,
+  "review_response_required": false,
+  "ci_status": "unknown",
+  "next_recommended_action": "Human review and merge of branch claude/l00prite-i2p-relay-setup-kdahma; operational deploy steps in todos.md require server access outside a coding session"
+}
