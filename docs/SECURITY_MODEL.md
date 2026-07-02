@@ -176,8 +176,10 @@ content they may be compelled to defend.
 
 In v1.0, Tor is opt-in, not default. Mobile clients integrate with Orbot; browser users can reach
 the deployment's `.onion` address via Tor Browser. The server ships an optional nginx + tor hidden
-service configuration (`docker-compose.tor.yml`). **As of v1.5 this is inverted — Tor is the default
-transport and clearnet is a flagged fallback; see the Tor-first section below.**
+service configuration (`docker-compose.tor.yml`). **As of v1.5 this is inverted — an anonymous
+transport is the default and clearnet is a flagged fallback, along a fixed hierarchy: I2P is the
+primary relay transport, Tor is the fallback when I2P is unavailable; see the transport hierarchy
+section below.**
 
 On Linux desktop, the app attempts Tor routing by default via a local tor daemon (port 9050) or Tor
 Browser (port 9150). For full Tor routing without a running tor daemon, launch via: `torsocks
@@ -203,7 +205,7 @@ the others.
         │   FLAG_SECURE · biometric lock · background blur             │
         │ ┌───────────────────────────────────────────────────────┐   │
         │ │ Layer 2 — Network                                      │   │
-        │ │   TLS 1.3 · cert pinning · Tor-first · 3-hop relay ·   │   │
+        │ │   TLS 1.3 · cert pinning · I2P-first · 3-hop relay ·   │   │
         │ │   decoy traffic · obfs4                                │   │
         │ │ ┌───────────────────────────────────────────────────┐ │   │
         │ │ │ Layer 3 — Identity                                │ │   │
@@ -272,12 +274,20 @@ Two VeraCrypt-analogous caveats apply, and are accepted deliberately:
   outer volume without mounting the hidden one can. Creating a vault on a device that may hold
   others is a deliberate, documented risk.
 
-### Tor-first network
+### Transport hierarchy (I2P primary, Tor fallback)
 
-Tor is now the **default** transport; clearnet is a fallback shown with a visible warning indicator
-(a yellow dot on the connection-mode badge — informative, not alarming). Native clients run Tor
-in-process (Guardian Project `Tor.framework` / `tor-android`) with no Orbot dependency; browser
-clients auto-detect an `.onion` host. Only v3 onion addresses are used.
+An anonymous transport is now the **default**; clearnet is a fallback shown with a visible warning
+indicator (a yellow dot on the connection-mode badge — informative, not alarming). The relay
+transport hierarchy is **fixed, not user-selectable**: I2P is the primary relay transport, Tor is
+the fallback when I2P is unavailable, and clearnet is the last resort. This replaced the earlier
+v1.5 `tor_first`/`i2p_first` user-choice model. Native clients run Tor in-process (Guardian Project
+`Tor.framework` / `tor-android`) with no Orbot dependency; browser clients auto-detect an `.onion`
+host. Only v3 onion addresses are used. Full rationale for I2P-first is in
+[`docs/TOR_ARCHITECTURE.md`](TOR_ARCHITECTURE.md) §6.
+
+Transport anonymity and message confidentiality are independent: clearnet fallback affects
+anonymity only — it never weakens encryption. Messages are Signal Protocol end-to-end encrypted
+regardless of which transport carries them.
 
 ### Tor architecture (three hidden services)
 
@@ -295,17 +305,17 @@ The honest anonymity claim is **client anonymity, not server anonymity**: the re
 via clearnet DNS. `HiddenServiceNonAnonymousMode` is never set, and no `Onion-Location` header is
 ever emitted (it would auto-advertise the secret mirror).
 
-The transport fallback chain is **Tor → I2P (future skeleton) → clearnet (last resort, warned)**. The
-user picks Tor-first or I2P-first; clearnet fallback can be disabled, in which case the app refuses to
-connect rather than going clearnet. Full detail, including the threat model and key backup, is in
-[`docs/TOR_ARCHITECTURE.md`](TOR_ARCHITECTURE.md).
+The transport fallback chain is **I2P (primary) → Tor (fallback) → clearnet (last resort,
+warned)** — fixed, not user-selectable. Clearnet fallback can be disabled in Settings → Network, in
+which case the app refuses to connect rather than going clearnet. Full detail, including the
+threat model and key backup, is in [`docs/TOR_ARCHITECTURE.md`](TOR_ARCHITECTURE.md).
 
 | Threat | Protected? | Notes |
 | --- | --- | --- |
-| Client IP exposed to relay | ✅ via Tor | Relay onion hides client IP from server |
+| Client IP exposed to relay | ✅ via I2P or Tor | I2P is primary (skeleton in v1.5, always falls through to Tor today); Tor is the fallback and hides client IP via the relay onion |
 | Server location hidden | ❌ | Hetzner IP is public; this is honest and documented |
 | APK distribution takedown | Partial ✅ | Two mirrors (public + secret), more nodes planned |
-| Clearnet traffic analysis | ⚠️ Fallback only | Clearnet is last resort with explicit warning |
+| Clearnet traffic analysis | ⚠️ Fallback only | Clearnet is last resort with explicit warning; message confidentiality is unaffected — only anonymity |
 
 ### Dead-drop mode
 

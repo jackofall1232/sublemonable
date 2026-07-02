@@ -60,7 +60,7 @@ Five layered defenses, each built as if the one beneath it has already failed:
 - 📨 **Dead-drop mode** — anonymous, account-free message deposit; no metadata links the two parties
 - 🌫️ **Decoy traffic** — continuous cover traffic makes a real send indistinguishable from idle
 - 🔀 **Multi-hop relay** — 3-hop onion routing; no single relay knows both ends
-- 🧅 **Tor-first** — Tor by default, clearnet only as a flagged fallback
+- 🧅 **I2P-first** — I2P by default, Tor as fallback, clearnet only as a flagged last resort
 - 👻 **Standard / Stealth / Ghost** connection modes
 - 🍋 **Privacy view** — frosted-lemon blur until you reveal, for shoulder-surfing defense
 

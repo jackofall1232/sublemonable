@@ -3,52 +3,32 @@
 // See the LICENSE file in the repository root for full license text.
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import {
-  CLEARNET_WARNING,
-  type PreferredTransport,
-  type TransportResolution,
-} from "@sublemonable/protocol";
+import { CLEARNET_WARNING, type TransportResolution } from "@sublemonable/protocol";
 
 /**
- * Resolves the active transport by probing in fallback-chain order.
+ * Resolves the active transport by probing in a fixed fallback-chain order —
+ * this is not user-selectable (see docs/TOR_ARCHITECTURE.md):
  *
- * Chain when preferredTransport === "tor_first":
- *   1. Tor (detected by .onion hostname or Tauri proxy probe)
- *   2. I2P (skeleton — always fails in v1.5)
+ *   1. I2P      (skeleton — always fails in v1.5, logs intent)
+ *   2. Tor      (detected by .onion hostname or Tauri proxy probe)
  *   3. Clearnet (last resort — always succeeds unless offline / fallback disabled)
  *
- * Chain when preferredTransport === "i2p_first":
- *   1. I2P (skeleton — always fails in v1.5, logs intent)
- *   2. Tor
- *   3. Clearnet
- *
- * In v1.5, I2P detection always returns false. The chain is wired correctly so
- * enabling I2P in a future release requires only implementing detectI2P().
+ * In v1.5, I2P detection always returns false, so the chain falls through to
+ * Tor correctly. The chain is wired so enabling I2P in a future release
+ * requires only implementing detectI2P().
  *
  * When `allowClearnetFallback` is false the resolver refuses to fall back to
  * clearnet and reports "offline" instead — the app then shows a "connection
  * refused" state rather than the warning banner (see Settings → Network).
  */
 export async function resolveTransport(
-  preferred: PreferredTransport,
   isTauriApp: boolean,
   allowClearnetFallback = true,
 ): Promise<TransportResolution> {
   // Probe lazily in fallback-chain order so each branch only does the work its
   // chain requires (and matches the documented order; see docs/TOR_ARCHITECTURE.md).
-  if (preferred === "tor_first") {
-    if (await detectTor(isTauriApp)) return { transport: "tor", showClearnetWarning: false };
-    if (await detectI2P()) return { transport: "i2p", showClearnetWarning: false };
-    return clearnetOrOffline(allowClearnetFallback);
-  }
-
-  // i2p_first — probe I2P first, then Tor, then clearnet.
   if (await detectI2P()) return { transport: "i2p", showClearnetWarning: false };
-  if (await detectTor(isTauriApp)) {
-    // I2P was preferred but unavailable; Tor is still an anonymous transport, so
-    // this is an info-level fallback, not a security warning (no banner).
-    return { transport: "tor", showClearnetWarning: false };
-  }
+  if (await detectTor(isTauriApp)) return { transport: "tor", showClearnetWarning: false };
   return clearnetOrOffline(allowClearnetFallback);
 }
 

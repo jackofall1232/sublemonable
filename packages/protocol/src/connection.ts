@@ -3,15 +3,14 @@
 // See the LICENSE file in the repository root for full license text.
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { DEFAULT_PREFERRED_TRANSPORT, type PreferredTransport } from "./transport.js";
-
 /**
  * Connection modes (v1.5). Three user-selectable profiles that compose the
  * network-layer features of the security onion. Each mode is a fixed bundle of
  * settings; selecting one in Settings → Network sets them all at once.
  *
- * Tor is the default transport in every mode — clearnet is only ever a fallback,
- * never a primary choice.
+ * Anonymous routing (I2P, falling back to Tor) is always on in every mode —
+ * clearnet is only ever a fallback, never a primary choice. See ./transport.ts
+ * for the fixed I2P -> Tor -> clearnet transport hierarchy.
  */
 
 export type ConnectionMode = "standard" | "stealth" | "ghost";
@@ -25,18 +24,18 @@ export type Platform = "ios" | "android" | "browser";
 /**
  * Live transport state shown by the connection-mode badge.
  *
- * "tor"               = connected via Tor hidden service (relay onion)
- * "i2p"               = connected via I2P (skeleton — never emitted in v1.5)
- * "clearnet_fallback" = connected via HTTPS/WSS clearnet; Tor and I2P unavailable
+ * "i2p"               = connected via I2P (skeleton — never emitted in v1.5); primary transport
+ * "tor"               = connected via Tor hidden service (relay onion); fallback when I2P is unavailable
+ * "clearnet_fallback" = connected via HTTPS/WSS clearnet; I2P and Tor unavailable — last resort
  * "offline"           = no connection
  */
-export type TransportState = "tor" | "i2p" | "clearnet_fallback" | "offline";
+export type TransportState = "i2p" | "tor" | "clearnet_fallback" | "offline";
 
 export interface ConnectionModeConfig {
   mode: ConnectionMode;
   label: string;
   description: string;
-  /** Tor is always true in v1.5 — clearnet is fallback, not a mode. */
+  /** Anonymous routing (I2P, falling back to Tor) is always true in v1.5 — clearnet is fallback, not a mode. */
   tor: true;
   /** Number of relay hops in the onion circuit. */
   relayHops: 1 | 3;
@@ -110,8 +109,6 @@ export function connectionModeConfig(mode: ConnectionMode): ConnectionModeConfig
 export interface PersistedNetworkSettings {
   connectionMode: ConnectionMode;
   coverTraffic: CoverTrafficIntensity;
-  /** Preferred anonymous transport — see ./transport.ts. */
-  preferredTransport: PreferredTransport;
   /**
    * When false, the transport resolver refuses to connect (returns "offline")
    * rather than falling back to warned clearnet. Default true.
@@ -122,6 +119,5 @@ export interface PersistedNetworkSettings {
 export const DEFAULT_NETWORK_SETTINGS: PersistedNetworkSettings = {
   connectionMode: DEFAULT_CONNECTION_MODE,
   coverTraffic: CONNECTION_MODES[DEFAULT_CONNECTION_MODE].decoyIntensity,
-  preferredTransport: DEFAULT_PREFERRED_TRANSPORT,
   allowClearnetFallback: true,
 };

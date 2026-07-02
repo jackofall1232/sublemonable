@@ -30,7 +30,6 @@ export default function App() {
   const [verifyPeer, setVerifyPeer] = useState<string | null>(null);
 
   const transport = useSettings((s) => s.transport);
-  const preferredTransport = useSettings((s) => s.preferredTransport);
   const allowClearnetFallback = useSettings((s) => s.allowClearnetFallback);
   const setTransport = useSettings((s) => s.setTransport);
   const fallbackReason = useSettings((s) => s.fallbackReason);
@@ -43,11 +42,12 @@ export default function App() {
     void bootstrap();
   }, [bootstrap]);
 
-  // Resolve the active transport along the fallback chain on startup and whenever
-  // the user changes their preference. A clearnet result un-dismisses the banner.
+  // Resolve the active transport along the fixed I2P -> Tor -> clearnet
+  // fallback chain on startup and whenever the clearnet-fallback preference
+  // changes. A clearnet result un-dismisses the banner.
   useEffect(() => {
     let cancelled = false;
-    void resolveTransport(preferredTransport, isTauri(), allowClearnetFallback).then((res) => {
+    void resolveTransport(isTauri(), allowClearnetFallback).then((res) => {
       if (cancelled) return;
       // Update the live transport. The store reconnects (or tears down, for
       // "offline") in response — see the transport subscription in store.ts —
@@ -60,7 +60,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [preferredTransport, allowClearnetFallback, setTransport, setFallbackReason]);
+  }, [allowClearnetFallback, setTransport, setFallbackReason]);
 
   const showClearnetBanner =
     phase === "ready" && transport === "clearnet_fallback" && !warningDismissed;

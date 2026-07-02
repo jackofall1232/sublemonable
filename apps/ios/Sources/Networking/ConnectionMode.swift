@@ -17,25 +17,16 @@ public enum CoverTrafficIntensity: String, Codable, CaseIterable {
 
 /// Live transport state shown by the connection-mode badge.
 ///
-/// I2P is a skeleton in v1.5 — never emitted — but present so this enum stays in
-/// lockstep with packages/protocol and a future release can enable it.
+/// The relay transport hierarchy is fixed, not user-selectable: I2P is the
+/// primary anonymous transport, Tor is the fallback when I2P is unavailable,
+/// and clearnet is the last resort. I2P is a skeleton in v1.5 — never emitted —
+/// but present so this enum stays in lockstep with packages/protocol and a
+/// future release can enable it.
 public enum TransportState: String, Codable {
-    case tor
     case i2p
+    case tor
     case clearnetFallback
     case offline
-}
-
-/// User-selectable preferred anonymous transport. `torFirst` tries Tor then I2P
-/// then clearnet; `i2pFirst` tries I2P then Tor then clearnet. In v1.5 I2P is a
-/// skeleton, so `i2pFirst` falls through to Tor. The option persists so the
-/// choice survives until I2P goes live. MUST stay in lockstep with
-/// packages/protocol transport.ts (raw values match "tor_first"/"i2p_first").
-public enum PreferredTransport: String, Codable, CaseIterable {
-    case torFirst = "tor_first"
-    case i2pFirst = "i2p_first"
-
-    public static let `default` = PreferredTransport.torFirst
 }
 
 public enum ConnectionMode: String, Codable, CaseIterable {
