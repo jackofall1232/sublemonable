@@ -213,10 +213,11 @@ subprotocol the server does not echo back (`"Server sent no subprotocol"`), and
 the gofiber server never echoes one; browsers tolerate the missing echo, so the
 browser WS path keeps using the subprotocol header. This failure is
 transport-independent — it was reproduced against the plain local server with no
-I2P involved — so the existing clearnet/Tor `ws_open` command carries the same
-latent bug and needs the same one-line query-param fix. That change is tracked as
-`TODO(ws-open-subproto)` and is **not** yet applied, to keep this I2P change
-scoped.
+I2P involved — so the clearnet/Tor `ws_open` command (`transport.rs`) uses the
+same `?token=` query param over its pinned `wss://` connection. Over TLS (and, on
+Tor, inside the circuit) the query string is encrypted in transit, and the server
+does no access logging, so this is not a token-exposure regression over the
+header.
 
 **Verification (2026-07-02, live i2pd + relay server tunnel).** Two authenticated
 sessions each dialed over their own I2P CONNECT tunnel and both upgraded (HTTP

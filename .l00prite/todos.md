@@ -2,13 +2,6 @@
 
 ## Next
 
-- [ ] **TODO(ws-open-subproto) — needs explicit approval.** The clearnet/Tor `ws_open`
-      command (`transport.rs`) still passes the token via `Sec-WebSocket-Protocol`, which
-      tungstenite 0.24 rejects when the server doesn't echo it back (`"Server sent no
-      subprotocol"`). Proven transport-independent this session (`examples/ws_subproto_diag.rs`:
-      header→FAIL, `?token=`→OK 101). Same one-line fix as `ws_open_i2p` (switch to the
-      `?token=` query param). Left unchanged because "do not change existing connection modes"
-      was gated — get sign-off, then apply and live-test the clearnet/Tor WS path.
 - [ ] **Release keystore off-box pull (pending user).** `~/onion-key-backup/sublemonable-release.jks`
       + `…-info.txt` are staged; scp them off-box and confirm. Not a real backup until pulled.
       Same for `~/onion-key-backup/sublemonable-relay.dat` (I2P dest key) and the three Tor
@@ -19,7 +12,7 @@
       never ship a locally-built .deb.
 - [ ] Clean up the throwaway `i2p-test-client` i2pd container when I2P WS testing is done
       (`docker rm -f i2p-test-client`). It provided the desktop-side proxy on 4444 for the live test.
-- [ ] Get `main` reviewed (pushed as `a942173`); decide on TODO(ws-open-subproto) before release.
+- [ ] Get `main` reviewed.
 
 ## Later — operational deploy steps (require server/build access outside a coding session)
 
@@ -77,7 +70,11 @@ they need real infrastructure access, signing keys, and a human decision point:
 - [x] (Run 5 / 2026-07-02) **WS-over-I2P live-verified** — `ws_open_i2p` (HTTP CONNECT tunneling
       through i2pd 4444, `type=server` tunnel, 30s timeouts, `?token=` auth). Two authed sessions
       upgraded 101, message round-trip, 60s idle survival, post-idle round-trip.
-      `TODO(i2p-ws-verify)` closed; §7 updated. (Follow-up: TODO(ws-open-subproto) for clearnet/Tor.)
+      `TODO(i2p-ws-verify)` closed; §7 updated.
+- [x] (Run 5) **TODO(ws-open-subproto) applied** — clearnet/Tor `ws_open` switched to the same
+      `?token=` query-param auth (the `Sec-WebSocket-Protocol` path was transport-independently
+      broken under tungstenite 0.24). TLS pinning untouched; `cargo build --lib` clean;
+      query-param path re-confirmed 101 + round-trip against the server.
 - [x] (Run 5) Corrected the i2pd config gotcha — `docker-compose.i2p.yml` now passes
       `--conf/--tunconf`; real server-tunnel dest `y5ac5zowrbpz…b32.i2p` (Run 4's `hgzwylzozn…`
       was the default client-proxy dest, a false positive — corrected in ledger + `.env`).

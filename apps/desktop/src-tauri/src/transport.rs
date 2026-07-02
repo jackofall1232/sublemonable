@@ -216,10 +216,20 @@ pub enum WsEvent {
     Closed { reason: String },
 }
 
-/// Open a pinned WebSocket to `wss://<API_HOST>/ws`, sending `token` as the
-/// `Sec-WebSocket-Protocol` (matching the server's auth handling). Incoming
-/// text frames and lifecycle events are streamed to `on_event`. Returns an id
-/// for [`ws_send`]/[`ws_close`].
+/// Open a pinned WebSocket to `wss://<API_HOST>/ws`, authenticating with `token`
+/// via the `?token=` query param. Incoming text frames and lifecycle events are
+/// streamed to `on_event`. Returns an id for [`ws_send`]/[`ws_close`].
+///
+/// Auth rides the `?token=` query param (the server's native-client path), NOT
+/// `Sec-WebSocket-Protocol`: tungstenite 0.24 fails the handshake when it
+/// requests a subprotocol the server does not echo back (`"Server sent no
+/// subprotocol"`), and the gofiber server never echoes one. The browser client
+/// keeps using the subprotocol header (browsers tolerate the missing echo). The
+/// token stays confidential — the query string travels inside the pinned TLS
+/// (and, over Tor, the circuit) to a server that does no access logging — and an
+/// invalid token can only yield control characters that `into_client_request`
+/// rejects below (CRLF-injection guard). See `i2p::ws_open_i2p` for the same
+/// mechanism over I2P.
 #[tauri::command]
 pub async fn ws_open(
     token: String,
@@ -228,19 +238,13 @@ pub async fn ws_open(
     registry: State<'_, WsRegistry>,
 ) -> Result<u64, String> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-    use tokio_tungstenite::tungstenite::http::HeaderValue;
     use tokio_tungstenite::tungstenite::Message;
     use tokio_tungstenite::Connector;
 
-    let ws_url = format!("wss://{}/ws", crate::pinning::API_HOST);
-    let mut request = ws_url
+    let ws_url = format!("wss://{}/ws?token={token}", crate::pinning::API_HOST);
+    let request = ws_url
         .into_client_request()
-        .map_err(|e| format!("bad ws url: {e}"))?;
-    // Token rides Sec-WebSocket-Protocol, exactly like the browser client.
-    request.headers_mut().insert(
-        "Sec-WebSocket-Protocol",
-        HeaderValue::from_str(&token).map_err(|_| "bad token header".to_string())?,
-    );
+        .map_err(|e| format!("bad ws url (token rejected): {e}"))?;
 
     let connector = Connector::Rustls(tls.0.clone());
     let (stream, _resp) =

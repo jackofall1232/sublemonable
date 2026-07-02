@@ -662,3 +662,17 @@ Multi-track session (Phase 0/1 sequential, then Tracks A–D). Nothing committed
 - **Release keystore off-box pull** — awaiting user confirmation.
 - **.deb glibc portability** — release builds should come from CI (ubuntu-22.04), not this host.
 - Mobile I2P (no SDK) and external Tor Browser §10 checklist remain future items.
+
+### Run 5 addendum — TODO(ws-open-subproto) applied (2026-07-02)
+- User approved fixing the clearnet/Tor `ws_open`. Switched `transport.rs::ws_open` from the
+  `Sec-WebSocket-Protocol` header to the `?token=` query param — the same mechanism as
+  `ws_open_i2p`, since the subprotocol failure was proven transport-independent this session.
+  **TLS pinning is untouched** (`connect_async_tls_with_config` + `Connector::Rustls` unchanged);
+  only the auth carrier and the now-unused `HeaderValue` import changed.
+- Verification: `cargo build --lib` clean (no warnings); `examples/ws_subproto_diag.rs` against
+  the live server — header path FAIL (`Server sent no subprotocol`), query-param path OK
+  (HTTP 101 + `prekey.low` round-trip). Over `wss://`/Tor the query string is inside TLS/circuit
+  and the server does no access logging, so no token-exposure regression.
+- Docs/todos updated (§7, `nativeTransport.ts`, todos Done). Now BOTH native WS paths
+  (clearnet/Tor and I2P) use the query param; only the in-browser `WebSocket` keeps the
+  subprotocol header (browsers tolerate the non-echo).

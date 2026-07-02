@@ -168,10 +168,9 @@ export class NativeWsSocket {
  * the handshake when it requests a subprotocol the server does not echo back,
  * which the browser `WebSocket` tolerates but tungstenite does not.
  *
- * NOTE: {@link NativeWsSocket} (the clearnet/Tor `ws_open` command) still passes
- * the token via `Sec-WebSocket-Protocol` and so hits this same tungstenite
- * failure — its query-param fix is pending review (see TODO(ws-open-subproto)),
- * kept separate from this I2P change per the change's scope.
+ * {@link NativeWsSocket} (the clearnet/Tor `ws_open` command) uses the same
+ * `?token=` query-param auth for the same reason — only the browser `WebSocket`
+ * path keeps the subprotocol header.
  *
  * Implements the same `WsClient` surface as {@link NativeWsSocket} —
  * `readyState`, the `on*` handlers, `send`, `close` — so it is a drop-in
