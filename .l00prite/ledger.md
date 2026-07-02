@@ -495,3 +495,50 @@ Append one entry per agent run. Do not overwrite prior runs.
   - Do NOT enable i2pd HTTP proxy (4444) or SOCKS proxy on the server's i2pd — the server only
     needs the router + server tunnel; outbound proxy capability on the server is unnecessary.
 - **Lock:** none.
+
+---
+
+### Run 4 addendum — WS-over-I2P verification (2026-07-02)
+
+- **Goal:** Empirically determine whether WS-over-I2P works and close or escalate `TODO(i2p-ws-verify)`.
+- **Result: BLOCKED — not closeable. Two confirmed failure modes.**
+
+  1. **`tokio-tungstenite` has no HTTP proxy support** (verified against live Cargo.toml and source).
+     `tokio_tungstenite::connect_async_tls_with_config()` performs a direct TCP connect to the URL's
+     hostname. The only enabled features are `connect` and `rustls-tls-webpki-roots`; no proxy
+     feature exists. No configuration change can route this through `127.0.0.1:4444`.
+
+  2. **`.b32.i2p` is not resolvable via standard DNS.** The connection attempt fails at the DNS
+     step before i2pd's proxy can intercept it.
+
+  REST via `i2p_request` (reqwest with `Proxy::http("http://127.0.0.1:4444")`) is unaffected —
+  reqwest routes the full URL to the proxy in proxy-form HTTP, bypassing DNS. WS has no equivalent.
+
+- **B32 destination confirmed live:**
+  `hgzwylzozn2g2krv372je6nc7obzp2z4yfrgfwnnuwsezjilkvha.b32.i2p` — readable from i2pd web
+  console at 127.0.0.1:7070. Stored in `.env` as `I2P_EEPSITE_DEST`.
+
+- **Tests run:**
+  - command: `curl -s 'http://127.0.0.1:7070/?page=i2p_tunnels' -H 'Host: localhost' | grep -oP '[a-z2-7]{52,}\.b32\.i2p'`; exit_code: 0; summary: B32 returned — tunnel is live; timestamp: 2026-07-02T12:43Z.
+  - command: `grep -n "connect_async\|proxy" apps/desktop/src-tauri/src/transport.rs`; exit_code: 0; summary: `connect_async_tls_with_config` — direct connect, no proxy path; timestamp: 2026-07-02.
+  - command: `grep "tokio-tungstenite" apps/desktop/src-tauri/Cargo.toml`; exit_code: 0; summary: features: `connect`, `rustls-tls-webpki-roots` — no proxy feature; timestamp: 2026-07-02.
+  - command: `curl -s http://localhost:8443/healthz`; exit_code: 0; summary: `{"i2p_dest":"hgzwylzozn2g2krv372je6nc7obzp2z4yfrgfwnnuwsezjilkvha.b32.i2p","i2p_enabled":true,"status":"ok","tor_enabled":true}`; timestamp: 2026-07-02.
+
+- **Fix path:** Implement HTTP CONNECT tunneling in a new `ws_open_i2p` command: TCP connect to
+  `127.0.0.1:4444` → write `CONNECT <b32>:80 HTTP/1.1\r\nHost: <b32>\r\n\r\n` → read
+  `200 Connection established` → pass the raw `TcpStream` to
+  `tokio_tungstenite::client_async_with_config()`. Whether i2pd's HTTP proxy accepts CONNECT to
+  I2P destinations (not just clearnet HTTPS) also needs a live test.
+
+- **Changed files:** `docs/TOR_ARCHITECTURE.md` §7 (WS blocked/confirmed), `.env`
+  (I2P_EEPSITE_DEST set), this ledger.
+
+- **Decisions:**
+  - `TODO(i2p-ws-verify)` is NOT closed — it is confirmed blocked with a specific fix path.
+  - Do not implement a workaround that changes Tor/clearnet WS behavior. The existing `ws_open`
+    command stays unchanged; I2P WS gets its own command when the CONNECT implementation is ready.
+
+- **Confidence:** High — failure modes are library-level facts confirmed in source, not speculation.
+
+- **Next action:** Implement `ws_open_i2p` with HTTP CONNECT tunneling and test on a live I2P
+  network with i2pd running locally on the desktop machine.

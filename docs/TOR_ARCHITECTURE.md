@@ -181,11 +181,24 @@ target URL's host against this constant before routing. No TLS: the `.b32.i2p`
 address is the cryptographic identity of the destination (same principle as §4 —
 authentication happens at the I2P layer).
 
-**WS-over-I2P: unverified.** WebSocket upgrade through i2pd's HTTP proxy requires
-HTTP CONNECT tunneling not trivially supported by `tokio-tungstenite`. REST
-(`i2p_request`) is the confirmed-correct path. WebSocket connections remain on the
-Tor/clearnet path until empirically verified with a live I2P network. Track:
-`TODO(i2p-ws-verify)` in `i2p.rs`.
+**WS-over-I2P: confirmed blocked (two layered failures, both verified against live
+code):**
+
+1. **Library has no proxy support.** `tokio_tungstenite::connect_async_tls_with_config()`
+   connects directly to the URL's hostname via DNS — no proxy features exist in
+   `tokio-tungstenite = "0.24"` (features: `connect`, `rustls-tls-webpki-roots`
+   only). No configuration change can route it through `127.0.0.1:4444`.
+
+2. **`.b32.i2p` is not resolvable via standard DNS.** The connection attempt fails
+   at DNS resolution before any proxy could intercept it.
+
+The fix requires implementing HTTP CONNECT tunneling in Rust before the WebSocket
+handshake: `TcpStream::connect("127.0.0.1:4444")` → `CONNECT <b32>:80 HTTP/1.1`
+→ `200 Connection established` → pass the resulting stream to
+`tokio_tungstenite::client_async_with_config()`. This is implementable but is
+non-trivial new code requiring its own testing pass on a live I2P network.
+`TODO(i2p-ws-verify)` in `i2p.rs` is **not closed**. WebSocket falls back to the
+Tor/clearnet `ws_open` command until this is implemented and verified.
 
 ### Mobile (iOS, Android) — blocked
 
