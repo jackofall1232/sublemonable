@@ -25,6 +25,16 @@ verified, and what remains. It follows the master's `versions.1.5.0.build_order`
 - **In-process Tor** (`Tor.framework` on iOS, `tor-android` on Android). The Tor-first *model* and
   badge exist; embedding the Tor binaries requires the Guardian Project libraries and a device/SDK
   build. Web Tor works today via the Tor Browser + `.onion` host (already detected).
+- **In-process I2P on mobile and WS-over-I2P on desktop.** The I2P relay transport is live on
+  server (docker-compose.i2p.yml, i2pd server tunnel, B32 destination) and Linux desktop (startup
+  probe via `check_i2p_connectivity`, REST routing through `i2p_request`). Two items remain blocked:
+  (1) **Mobile in-process I2P** — no production I2P router SDK exists for iOS/Android in-process
+  embedding (same SDK dependency class as Guardian Project's `Tor.framework`/`tor-android`);
+  `detectI2P()` is an honest stub on mobile, the chain falls correctly to Tor; (2) **WS-over-I2P**
+  — WebSocket upgrade through i2pd's HTTP CONNECT proxy is not trivially supported by
+  `tokio-tungstenite` and has not been empirically verified on a live I2P network; `TODO(i2p-ws-verify)`
+  in `i2p.rs`. Browser I2P is architecturally blocked (JS cannot set proxy). Neither mobile nor
+  browser I2P is complete or shippable.
 - **Web multi-vault storage wiring.** The vault crypto (`packages/crypto/vault.ts`) is complete and
   timing-parity tested. Wiring it into `apps/web` `lib/storage.ts` + the unlock/setup flow was
   deliberately *not* shipped half-finished: correct plausible-deniability storage requires every

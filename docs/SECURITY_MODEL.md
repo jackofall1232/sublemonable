@@ -312,7 +312,7 @@ threat model and key backup, is in [`docs/TOR_ARCHITECTURE.md`](TOR_ARCHITECTURE
 
 | Threat | Protected? | Notes |
 | --- | --- | --- |
-| Client IP exposed to relay | ✅ via I2P or Tor | I2P is primary (skeleton in v1.5, always falls through to Tor today); Tor is the fallback and hides client IP via the relay onion |
+| Client IP exposed to relay | ✅ via I2P or Tor | I2P is primary relay transport: live on server + Linux desktop (REST; WS unverified); skeleton on mobile/browser — chain falls to Tor which hides client IP via the relay onion |
 | Server location hidden | ❌ | Hetzner IP is public; this is honest and documented |
 | APK distribution takedown | Partial ✅ | Two mirrors (public + secret), more nodes planned |
 | Clearnet traffic analysis | ⚠️ Fallback only | Clearnet is last resort with explicit warning; message confidentiality is unaffected — only anonymity |

@@ -11,6 +11,7 @@
 //! OS-level screenshot hard block; see `screenshot.rs`). No message content and
 //! no secret bytes are ever logged here.
 
+mod i2p;
 mod keystore;
 mod pinning;
 mod screenshot;
@@ -29,6 +30,8 @@ pub fn run() {
     // setup fails to launch rather than silently running unpinned.
     let tls = transport::pinned_tls_config();
     let http = transport::build_http_client(tls.clone());
+    // I2P-proxied client — routes http:// requests through i2pd at 127.0.0.1:4444.
+    let i2p_http = i2p::build_i2p_http_client();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -37,6 +40,7 @@ pub fn run() {
         .manage(transport::PinnedHttp(http))
         .manage(transport::PinnedTls(tls))
         .manage(transport::WsRegistry::default())
+        .manage(i2p::I2pHttp(i2p_http))
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -46,15 +50,20 @@ pub fn run() {
                 window::harden(&main);
             }
 
-            // Tor-first: probe local SOCKS proxies and announce the connection
-            // mode so the existing frontend badge can render Tor / clearnet.
+            // Fixed fallback chain: I2P first, then Tor, then clearnet.
+            // i2p::detect_and_announce returns true and emits "i2p" if the local
+            // i2pd proxy is up; otherwise we fall through to the Tor probe.
             tauri::async_runtime::spawn(async move {
-                tor::detect_and_announce(handle).await;
+                if !i2p::detect_and_announce(handle.clone()).await {
+                    tor::detect_and_announce(handle).await;
+                }
             });
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            i2p::check_i2p_connectivity,
+            i2p::i2p_request,
             keystore::store_vault,
             keystore::load_vault,
             keystore::delete_vault,

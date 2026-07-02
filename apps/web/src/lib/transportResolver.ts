@@ -9,13 +9,10 @@ import { CLEARNET_WARNING, type TransportResolution } from "@sublemonable/protoc
  * Resolves the active transport by probing in a fixed fallback-chain order —
  * this is not user-selectable (see docs/TOR_ARCHITECTURE.md):
  *
- *   1. I2P      (skeleton — always fails in v1.5)
- *   2. Tor      (detected by .onion hostname or Tauri proxy probe)
- *   3. Clearnet (last resort — always succeeds unless offline / fallback disabled)
- *
- * In v1.5, I2P detection always returns false, so the chain falls through to
- * Tor correctly. The chain is wired so enabling I2P in a future release
- * requires only implementing detectI2P().
+ *   1. I2P      — live on Linux desktop (Tauri) when i2pd is running; skeleton on
+ *                 mobile (no SDK) and browser (no proxy control).
+ *   2. Tor      — detected by .onion hostname (browser) or Tauri SOCKS proxy probe.
+ *   3. Clearnet — last resort, shown with a warning banner unless fallback is off.
  *
  * When `allowClearnetFallback` is false the resolver refuses to fall back to
  * clearnet and reports "offline" instead — the app then shows a "connection
@@ -27,7 +24,7 @@ export async function resolveTransport(
 ): Promise<TransportResolution> {
   // Probe lazily in fallback-chain order so each branch only does the work its
   // chain requires (and matches the documented order; see docs/TOR_ARCHITECTURE.md).
-  if (await detectI2P()) return { transport: "i2p", showClearnetWarning: false };
+  if (await detectI2P(isTauriApp)) return { transport: "i2p", showClearnetWarning: false };
   if (await detectTor(isTauriApp)) return { transport: "tor", showClearnetWarning: false };
   return clearnetOrOffline(allowClearnetFallback);
 }
@@ -72,16 +69,34 @@ async function detectTor(isTauriApp: boolean): Promise<boolean> {
 }
 
 /**
- * I2P detection — skeleton only in v1.5.
+ * I2P detection.
  *
- * INTENT (future): probe a local I2P HTTP proxy (typically 127.0.0.1:4444) or an
- * I2P SAM bridge. If reachable, route WebSocket and REST traffic through it to
- * the relay's I2P destination address.
+ * On the Tauri (Linux desktop) path: invokes `check_i2p_connectivity`, which
+ * does a TCP probe of 127.0.0.1:4444 (the i2pd default HTTP proxy) with a
+ * 5-second timeout. Returns true if i2pd is running and accepting connections.
  *
- * In v1.5 this always returns false. The function signature and call site are in
- * place so future implementation requires no structural changes.
+ * On the browser path: always returns false — browser JS cannot control proxy
+ * settings, so there is no way to route .b32.i2p traffic from here.
+ *
+ * On mobile (iOS, Android): always returns false — no in-process I2P router SDK
+ * exists yet; the chain falls through to Tor. See docs/V1_5_STATUS.md.
  */
-async function detectI2P(): Promise<boolean> {
-  // TODO(i2p-v2): probe 127.0.0.1:4444 or SAM bridge
+async function detectI2P(isTauriApp: boolean): Promise<boolean> {
+  if (typeof location !== "undefined" && location.hostname.endsWith(".b32.i2p")) {
+    return true; // reached via an I2P browser (rare but valid)
+  }
+  if (isTauriApp) {
+    try {
+      const invoke = (
+        window as unknown as {
+          __TAURI__?: { core?: { invoke?: (cmd: string) => Promise<unknown> } };
+        }
+      ).__TAURI__?.core?.invoke;
+      if (!invoke) return false;
+      return (await invoke("check_i2p_connectivity")) as boolean;
+    } catch {
+      return false;
+    }
+  }
   return false;
 }

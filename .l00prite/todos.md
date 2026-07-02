@@ -2,8 +2,22 @@
 
 ## Next
 
-- [ ] Get this branch (`claude/l00prite-i2p-relay-setup-kdahma`) reviewed and merged — it contains
-      the l00prite memory setup and the I2P-primary transport hierarchy change (see `ledger.md`).
+- [ ] Bring up the I2P overlay and read the relay B32 destination (see `docker-compose.i2p.yml`
+      and `docs/SELF_HOSTING.md` §"Optional I2P relay transport"):
+      `docker compose -f docker-compose.yml -f docker-compose.i2p.yml up -d`
+      then `curl -s 'http://127.0.0.1:7070/?page=i2p_tunnels' | grep -oP '[a-z2-7]+\.b32\.i2p' | head -1`
+- [ ] Set `I2P_ENABLED=true`, `I2P_EEPSITE_DEST=<b32>` in `.env`; restart server with
+      `docker compose -f docker-compose.yml -f docker-compose.i2p.yml up -d server`.
+- [ ] Build desktop with `RELAY_I2P_DEST=<b32>` set: `export RELAY_I2P_DEST=<b32> && pnpm tauri build`.
+- [ ] Back up `i2p-data` volume (specifically `sublemonable-relay.dat`) alongside the Tor hidden
+      service keys and JWT keys — see `docs/SELF_HOSTING.md` §"Back up your I2P destination key".
+- [ ] Empirically verify REST routing over I2P on desktop: with i2pd running and `RELAY_I2P_DEST`
+      set, confirm the app routes REST calls through `i2p_request` and receives valid API responses.
+- [ ] Investigate `TODO(i2p-ws-verify)` in `i2p.rs` — test WebSocket upgrade through i2pd HTTP
+      proxy to a `.b32.i2p` destination. If i2pd's HTTP proxy does not support CONNECT for WS
+      upgrade, document alternative (SAM bridge or tokio HTTP CONNECT implementation) and flag
+      to operator before declaring WS-over-I2P done.
+- [ ] Get this branch reviewed and merged.
 
 ## Later — operational deploy steps (require server/build access outside a coding session)
 
@@ -52,21 +66,28 @@ they need real infrastructure access, signing keys, and a human decision point:
       consumer yet.
 - [ ] Background decoy tasks (iOS `BGProcessingTask`, Android `WorkManager`, web Service Worker).
 - [ ] QR generation/scanning for dead-drop token exchange (currently copy/paste token only).
-- [ ] Live I2P transport (`detectI2P()` is still a stub returning `false` — see `memory.md`; the
-      *hierarchy* is now fixed to I2P-primary as of this session, but actual I2P connectivity is
-      still unbuilt).
+- [ ] **In-process I2P on mobile** (iOS/Android) — no production I2P router SDK exists for
+      in-process embedding; requires same class of SDK work as Guardian Project's `Tor.framework`/
+      `tor-android`. `detectI2P()` is an honest stub on mobile; the chain falls correctly to Tor.
+      Do NOT mark as done until a real SDK is embedded. See `docs/V1_5_STATUS.md`.
+- [ ] **WS-over-I2P** (`TODO(i2p-ws-verify)` in `apps/desktop/src-tauri/src/i2p.rs`) — requires
+      empirical testing on a live I2P network. `i2p_request` (REST) is the confirmed-working path.
+      Do NOT mark as done without live verification.
 
 ## Done
 
-- [x] (this session) Populated `.l00prite/` memory from existing docs — no fresh `/build-loop`
+- [x] (Run 1) Populated `.l00prite/` memory from existing docs — no fresh `/build-loop`
       scaffolding run.
-- [x] (this session) Made I2P the fixed primary relay transport across
+- [x] (Run 1) Made I2P the fixed primary relay transport across
       `packages/protocol`, `apps/web`, and the iOS/Android connection-mode data models; updated
       `docs/TOR_ARCHITECTURE.md` and `docs/SECURITY_MODEL.md` to match.
-- [x] (this session) Verified `RELAY_ONION_ADDRESS` build injection on web (correct, and
-      consumed by `getServerUrl()`) and Android (correct `buildConfigField` wiring); confirmed
-      desktop's `build.rs` injection is mechanically correct but currently unconsumed (see
-      follow-up above); fixed iOS, which was both self-referential in `Release.xcconfig` *and*
-      never wired into the generated Xcode project at all (`project.yml` had no `configFiles`
-      entry referencing it) — added `configFiles`, an `Info.plist` key, and
-      `RelayConfig.swift`.
+- [x] (Run 1) Verified `RELAY_ONION_ADDRESS` build injection on web and Android; fixed iOS
+      `Release.xcconfig` self-reference and missing `project.yml` `configFiles` wiring.
+- [x] (Run 4 / 2026-07-02) Made I2P a real relay transport on **server and Linux desktop**:
+      `docker-compose.i2p.yml`, i2pd server tunnel config, `GET /healthz` endpoint,
+      `RELAY_I2P_DEST` build injection, `i2p.rs` module (`I2pHttp`, `check_i2p_connectivity`,
+      `i2p_request`), startup probe (I2P before Tor in `lib.rs`), `detectI2P(isTauriApp)` Tauri
+      branch in `transportResolver.ts`, `i2pRequest()` in `nativeTransport.ts`, updated
+      `pinning.rs` ENFORCEMENT STATUS comment. Docs updated: `TOR_ARCHITECTURE.md` §7,
+      `V1_5_STATUS.md`, `SECURITY_MODEL.md`, `SELF_HOSTING.md`, `server/.env.example`.
+      Mobile and browser I2P remain honest stubs. WS-over-I2P explicitly unverified.

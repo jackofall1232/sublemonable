@@ -14,21 +14,21 @@
 //! BACKUP pin is an offline-held spare key — point the server at it and clients
 //! keep trusting it without an app update.
 //!
-//! ENFORCEMENT STATUS — not yet active on desktop. The REST/WebSocket traffic
-//! is made by the bundled `apps/web` UI inside the system WebView, whose TLS
-//! stack we cannot pin from JavaScript, and this Tauri crate currently has no
-//! native HTTP client. To make these pins enforced, route the transport through
-//! Rust (e.g. a `reqwest`/`rustls` client behind Tauri commands, or a local
-//! WebView proxy) and reject any handshake whose leaf SPKI hash is not in
-//! [`PINS`]. Sketch of the rustls verifier hook:
+//! ENFORCEMENT STATUS — **active on desktop**.
 //!
-//! ```ignore
-//! // inside a rustls ServerCertVerifier, after the platform chain check:
-//! let spki = leaf_cert.subject_public_key_info();           // DER SPKI bytes
-//! let digest = sha2::Sha256::digest(spki);
-//! let pin = format!("sha256/{}", base64::engine::general_purpose::STANDARD.encode(digest));
-//! if !pinning::is_pinned(&pin) { return Err(rustls::Error::General("pin mismatch".into())); }
-//! ```
+//! All REST and WebSocket traffic is routed through native Tauri commands
+//! (`pinned_request`, `ws_open`/`ws_send`/`ws_close`) backed by a
+//! `reqwest`/`tokio-tungstenite` client with a custom `rustls` verifier
+//! ([`transport::PinnedVerifier`]). `apps/web` invokes these commands via
+//! `nativeTransport.ts` (`nativeRequest` / `NativeWsSocket`) rather than the
+//! WebView's own `fetch`/`WebSocket`, so the WebView's unpinned TLS stack is
+//! never used for transport to the relay.
+//!
+//! Pinning applies to **clearnet connections only**. Over Tor (`.onion`) and I2P
+//! (`.b32.i2p`), the destination address is the cryptographic identity — pinning
+//! is not needed and not applied (see docs/TOR_ARCHITECTURE.md §4). I2P REST
+//! traffic uses `i2p_request` (see `i2p.rs`), which routes through the local
+//! i2pd HTTP proxy and validates against the build-time `RELAY_I2P_DEST` constant.
 
 /// Host these pins apply to. Must match the server URL the bundled web UI
 /// connects to (build the desktop bundle with

@@ -29,7 +29,7 @@ export interface NativeHttpResponse {
   body: string;
 }
 
-/** Pinned HTTPS request via the native client. */
+/** Pinned HTTPS request via the native client (clearnet / Tor paths). */
 export async function nativeRequest(
   method: string,
   url: string,
@@ -38,6 +38,29 @@ export async function nativeRequest(
 ): Promise<NativeHttpResponse> {
   const { invoke } = await core();
   return invoke<NativeHttpResponse>("pinned_request", {
+    method,
+    url,
+    headers,
+    body: body ?? null,
+  });
+}
+
+/**
+ * I2P request via the native client. Routes through the local i2pd HTTP proxy
+ * at 127.0.0.1:4444; targets the relay I2P destination baked in at build time
+ * (`RELAY_I2P_DEST`). Use `http://` URLs — I2P provides transport security.
+ *
+ * Note: WS-over-I2P is not yet implemented. WebSocket connections fall back to
+ * the Tor/clearnet path regardless of transport mode. TODO(i2p-ws-verify).
+ */
+export async function i2pRequest(
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  body?: string,
+): Promise<NativeHttpResponse> {
+  const { invoke } = await core();
+  return invoke<NativeHttpResponse>("i2p_request", {
     method,
     url,
     headers,

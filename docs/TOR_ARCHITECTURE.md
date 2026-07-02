@@ -144,29 +144,72 @@ trade-off is still in effect. A user who sets *Fallback to clearnet* to **off**
 trades availability for safety: the app then reports "I2P and Tor unavailable —
 connection refused" and does not connect over clearnet at all.
 
-## 7. I2P — intent and scope
+## 7. I2P — status and scope
 
-I2P is wired as a **skeleton** in v1.5, as the fixed primary relay transport
-(§6). In place today:
+I2P is a **live relay transport** on the server and Linux desktop. It remains a
+**skeleton on mobile (iOS, Android) and browser** — the same in-process SDK
+constraint that blocks Tor on mobile (§8, `docs/V1_5_STATUS.md`) blocks I2P there
+too.
 
-- the `i2p` value in the `TransportState` type, and
-- the fallback chain (`resolveTransport` calls `detectI2P()` first, ahead of
-  `detectTor()`).
+### Server
 
-**Not** implemented: any live I2P traffic. `detectI2P()` always returns `false`,
-so the chain always falls straight through to Tor.
+`docker-compose.i2p.yml` runs a `purplei2p/i2pd` container configured as a server
+tunnel: it creates an I2P destination (`.b32.i2p` address) derived from a
+persistent key file and forwards inbound I2P connections to the Go server on
+`server:8443`. The destination key (`sublemonable-relay.dat`) lives in the
+`i2p-data` named volume; losing the volume means losing the B32 address permanently
+— the same consequence as losing an onion key, so back up the volume alongside the
+`hs_ed25519_secret_key` files (§5). Host-gating is automatic: an I2P client sends a
+`Host: <b32addr>.b32.i2p` header, which does not match `PUBLIC_ONION_ADDRESS` or
+`SECRET_ONION_ADDRESS` (both `.onion`), so `isMirrorHost()` returns false and the
+request falls through to the API. The relay is API-only over I2P by construction,
+with no extra configuration needed.
 
-When I2P is enabled in a future release, the relay will publish an I2P destination
-address and the app will detect a local I2P proxy (typically `127.0.0.1:4444`) or
-a SAM bridge and route WebSocket and REST traffic through it. The function
-signature and call site already exist, so that work requires no structural change.
+### Linux desktop
+
+On startup the app probes `127.0.0.1:4444` (the i2pd default HTTP proxy) with a
+short TCP timeout. If it answers, `i2p::detect_and_announce()` emits
+`connection-mode-changed` with `mode = "i2p"` and returns `true`; the Tor probe is
+then skipped entirely (I2P is primary in the fixed hierarchy). The frontend
+`detectI2P()` in `transportResolver.ts` calls the Tauri `check_i2p_connectivity`
+command on the Tauri path.
+
+REST traffic is routed through a separate `reqwest` client configured with an HTTP
+proxy at `127.0.0.1:4444` (`i2p_request` Tauri command). The relay I2P destination
+is baked in at build time via `RELAY_I2P_DEST`; the Rust command validates the
+target URL's host against this constant before routing. No TLS: the `.b32.i2p`
+address is the cryptographic identity of the destination (same principle as §4 —
+authentication happens at the I2P layer).
+
+**WS-over-I2P: unverified.** WebSocket upgrade through i2pd's HTTP proxy requires
+HTTP CONNECT tunneling not trivially supported by `tokio-tungstenite`. REST
+(`i2p_request`) is the confirmed-correct path. WebSocket connections remain on the
+Tor/clearnet path until empirically verified with a live I2P network. Track:
+`TODO(i2p-ws-verify)` in `i2p.rs`.
+
+### Mobile (iOS, Android) — blocked
+
+No production-ready I2P router SDK for iOS or Android exists for in-process
+embedding. `detectI2P()` always returns false on mobile; the chain falls through to
+Tor. Adding in-process I2P on mobile is tracked in `docs/V1_5_STATUS.md` as a
+future item with the same dependency class as in-process Tor (Guardian Project
+`Tor.framework` / `tor-android`).
+
+### Browser — blocked
+
+Browser JavaScript cannot control proxy settings. `detectI2P()` returns false in
+the browser; the fallback chain reaches Tor (detected by `.onion` hostname) or
+clearnet. No structural change is needed to fix this — the constraint is
+platform-imposed.
+
+### Threat model comparison
 
 I2P and Tor serve partially different threat models: I2P is stronger for traffic
 that stays inside its own network (no exit nodes) and its unidirectional tunnels
 raise the cost of timing correlation (§6); Tor is stronger for exit traffic and
 has a much larger anonymity set. The fixed hierarchy uses I2P first for relay
-traffic and falls back to Tor rather than offering a user choice, so every
-client gets the stronger default without needing to understand the tradeoff.
+traffic and falls back to Tor rather than offering a user choice, so every client
+gets the stronger default without needing to understand the tradeoff.
 
 ## 8. Community relay nodes
 
@@ -212,7 +255,7 @@ After deployment, verify:
 - [ ] Direct IP probe on port 8443 (no `Host` header) → API responds. Mirror does **not** render.
 - [ ] App on clearnet → settings show "Clearnet fallback active" warning banner.
 - [ ] App connected via relay `.onion` → no warning banner, badge shows Tor active.
-- [ ] Fixed-chain fallback order: with I2P unreachable (v1.5 skeleton — always the case), Tor
+- [ ] Fixed-chain fallback order: with i2pd not running (I2P unreachable), Tor
       available → badge shows Tor active, no user-facing choice offered in Settings → Network.
 - [ ] Fixed-chain fallback order: with I2P and Tor both unreachable → clearnet fallback banner
       reads "Clearnet fallback active" (or connection is refused if fallback is disabled).

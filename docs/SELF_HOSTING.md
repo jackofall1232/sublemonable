@@ -246,6 +246,75 @@ Future APK releases are published separately — re-run the two commands above w
 the new build to update both mirrors; no rebuild of the server is required (the
 directory is bind-mounted).
 
+## Optional I2P relay transport
+
+The I2P overlay adds a second anonymous relay transport: the relay API is exposed
+as an I2P destination (`.b32.i2p` address). Desktop clients probe `127.0.0.1:4444`
+(the local i2pd HTTP proxy) on startup and, if reachable, route REST traffic
+through it — I2P-first, Tor fallback. See [`docs/TOR_ARCHITECTURE.md`](TOR_ARCHITECTURE.md)
+§7 for the full design and threat model comparison.
+
+### Start the overlay
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.i2p.yml up -d
+```
+
+### Read your I2P destination
+
+I2P tunnel build takes 1-2 minutes after startup. Once the tunnel is established:
+
+```bash
+curl -s 'http://127.0.0.1:7070/?page=i2p_tunnels' | grep -oP '[a-z2-7]+\.b32\.i2p' | head -1
+```
+
+### Configure the server
+
+Set the B32 destination in `.env` and restart:
+
+```bash
+I2P_ENABLED=true
+I2P_EEPSITE_DEST=<b32address>.b32.i2p
+
+docker compose -f docker-compose.yml -f docker-compose.i2p.yml up -d server
+```
+
+### Bake the destination into desktop builds
+
+The desktop app validates the I2P destination at the Rust layer. Set `RELAY_I2P_DEST`
+before building so the value is fixed at compile time and cannot be overridden by
+the WebView at runtime:
+
+```bash
+export RELAY_I2P_DEST=<b32address>.b32.i2p
+pnpm tauri build
+```
+
+### Back up your I2P destination key
+
+The destination key file (`sublemonable-relay.dat`) lives in the `i2p-data` Docker
+volume. Losing it means losing the B32 address permanently — the same consequence
+as losing an onion key. Back it up alongside the Tor hidden service keys and the
+JWT signing keys:
+
+```bash
+docker compose cp i2p:/home/i2pd/data/sublemonable-relay.dat ./i2p-key-backup/
+```
+
+### Host-gating
+
+I2P clients send a `Host: <b32addr>.b32.i2p` header. This does not match either
+mirror address (both `.onion`), so `isMirrorHost()` returns false and the request
+falls through to the API. The relay is API-only over I2P by construction — no
+extra configuration needed.
+
+| Request via… | API | Static APK mirror |
+| --- | --- | --- |
+| `Host: <b32addr>.b32.i2p` (I2P) | ✅ served | ❌ not mounted |
+| `Host: <relay>.onion` (Tor relay) | ✅ served | ❌ not mounted |
+| `Host: <public>.onion` / `<secret>.onion` (mirrors) | ✅ served | ✅ served |
+| `Host: relay.example.com` / IP (clearnet) | ✅ served | ❌ not mounted |
+
 ## Updating
 
 ```bash

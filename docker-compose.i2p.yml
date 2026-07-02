@@ -1,0 +1,40 @@
+# docker-compose.i2p.yml — I2P overlay for the Sublemonable stack.
+#
+# Start with:
+#   docker compose -f docker-compose.yml -f docker-compose.i2p.yml up -d
+#
+# After first startup, allow 1-2 minutes for the I2P tunnel to build, then read
+# the relay B32 destination:
+#   curl -s 'http://127.0.0.1:7070/?page=i2p_tunnels' | grep -oP '[a-z2-7]+\.b32\.i2p' | head -1
+#
+# Set I2P_EEPSITE_DEST=<b32address>.b32.i2p in .env, then restart the server:
+#   docker compose -f docker-compose.yml -f docker-compose.i2p.yml up -d server
+#
+# To bake the destination into the desktop build, export RELAY_I2P_DEST before building:
+#   export RELAY_I2P_DEST=<b32address>.b32.i2p
+#   pnpm tauri build
+#
+# Key backup: the destination key (sublemonable-relay.dat) lives in the i2p-data
+# volume. Losing this volume permanently changes the B32 address. Back up the
+# volume's data directory alongside tor-data and server/keys.
+
+services:
+  i2p:
+    image: purplei2p/i2pd:latest
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "127.0.0.1:7070:7070"   # web console — read B32 destination, localhost only
+    volumes:
+      - i2p-data:/home/i2pd/data
+      - ./i2p/i2pd.conf:/etc/i2pd/i2pd.conf:ro
+      - ./i2p/tunnels.conf:/etc/i2pd/tunnels.conf:ro
+
+  server:
+    environment:
+      I2P_ENABLED: "true"
+      I2P_EEPSITE_DEST: ${I2P_EEPSITE_DEST:-}
+
+volumes:
+  i2p-data:

@@ -104,6 +104,17 @@ func main() {
 		hub.Serve(conn.Locals("ws_account_id").(uuid.UUID), conn)
 	}))
 
+	// Health endpoint — operator diagnostics and the §10 testing checklist.
+	// Returns transport status; accessible over Tor relay onion and clearnet alike.
+	app.Get("/healthz", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"status":      "ok",
+			"tor_enabled": cfg.TorEnabled,
+			"i2p_enabled": cfg.I2PEnabled,
+			"i2p_dest":    cfg.I2PEepsiteDest,
+		})
+	})
+
 	// Onion mirror: when running as a Tor hidden service with a site directory
 	// configured, serve a static no-JS mirror (APK download, checksums,
 	// self-hosting instructions). Registered after the API routes so they always

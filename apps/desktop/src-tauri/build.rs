@@ -14,5 +14,15 @@ fn main() {
         std::env::var("RELAY_ONION_ADDRESS").unwrap_or_default()
     );
 
+    // Bake the relay I2P destination (*.b32.i2p) in at build time. Same rationale
+    // as RELAY_ONION_ADDRESS: the address is never committed; the Rust layer
+    // validates requests against this constant so the WebView cannot supply an
+    // arbitrary I2P destination. Empty when unset (i2p_request returns an error).
+    println!("cargo:rerun-if-env-changed=RELAY_I2P_DEST");
+    println!(
+        "cargo:rustc-env=RELAY_I2P_DEST={}",
+        std::env::var("RELAY_I2P_DEST").unwrap_or_default()
+    );
+
     tauri_build::build();
 }
