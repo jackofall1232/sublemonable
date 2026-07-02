@@ -14,6 +14,13 @@ options:
     iOS: "16.0"
   createIntermediateGroups: true
 
+# Wires Configuration/Release.xcconfig into the generated project's Release
+# configuration (previously unreferenced anywhere in this file, so the
+# RELAY_ONION_ADDRESS build setting it comments about was never actually
+# applied to a build regardless of what the xcconfig itself contained).
+configFiles:
+  Release: Configuration/Release.xcconfig
+
 settings:
   base:
     SWIFT_VERSION: "5.9"

@@ -26,6 +26,12 @@
 	<string>1.0.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<!-- Baked in at build time from the RELAY_ONION_ADDRESS build setting (see
+	     Configuration/Release.xcconfig). NEVER published or committed — empty
+	     string when the build did not set it. Read via RelayConfig.onionAddress
+	     (Sources/Networking/RelayConfig.swift). -->
+	<key>RELAY_ONION_ADDRESS</key>
+	<string>$(RELAY_ONION_ADDRESS)</string>
 	<!-- Empty launch screen: the system shows a plain dark screen, then the
 	     SplashView lemon-slice sequence takes over. -->
 	<key>UILaunchScreen</key>
