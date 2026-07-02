@@ -25,7 +25,7 @@ public enum CoverTrafficIntensity: String, Codable, CaseIterable {
 public enum TransportState: String, Codable {
     case i2p
     case tor
-    case clearnetFallback
+    case clearnetFallback = "clearnet_fallback"
     case offline
 }
 
