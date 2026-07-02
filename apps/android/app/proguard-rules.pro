@@ -20,6 +20,12 @@
 # ZXing (pure Java).
 -keep class com.google.zxing.** { *; }
 
+# RELAY_ONION_ADDRESS is baked into BuildConfig at build time (see
+# app/build.gradle.kts). Nothing references it yet (mobile onion direct-dial is
+# a future item), so R8 would strip the dead constant and the release APK would
+# ship WITHOUT the relay address. Keep the class so the baked value survives.
+-keep class com.sublemonable.app.BuildConfig { *; }
+
 # Never obfuscate away the protocol envelope (serialized via org.json by hand,
 # so reflection is not used — these rules are belt-and-braces only).
 -keep class com.sublemonable.app.data.MessageEnvelope { *; }

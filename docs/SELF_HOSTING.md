@@ -228,7 +228,7 @@ the `onion-site/` directory, which is mounted read-only into the server:
 
 ```bash
 # Copy the release APK you want to distribute into the mirror directory
-cp sublemonable-v1.0.0-beta.apk onion-site/
+cp sublemonable-v1.5.0-beta.apk onion-site/
 
 # Generate a checksum list the mirror serves at /SHA256SUMS
 sha256sum onion-site/*.apk > onion-site/SHA256SUMS

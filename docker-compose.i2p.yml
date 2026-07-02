@@ -24,6 +24,12 @@ services:
     restart: unless-stopped
     depends_on:
       - server
+    # The image entrypoint runs `i2pd --datadir=/home/i2pd/data` and appends any
+    # compose `command` args. Without explicit --conf/--tunconf, i2pd reads the
+    # image's default config from the datadir and silently ignores the files
+    # mounted below — no server tunnel is created and the console shows only the
+    # default client proxies' transient destination.
+    command: --conf=/etc/i2pd/i2pd.conf --tunconf=/etc/i2pd/tunnels.conf
     ports:
       - "127.0.0.1:7070:7070"   # web console — read B32 destination, localhost only
     volumes:

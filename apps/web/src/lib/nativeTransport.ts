@@ -50,8 +50,8 @@ export async function nativeRequest(
  * at 127.0.0.1:4444; targets the relay I2P destination baked in at build time
  * (`RELAY_I2P_DEST`). Use `http://` URLs — I2P provides transport security.
  *
- * Note: WS-over-I2P is not yet implemented. WebSocket connections fall back to
- * the Tor/clearnet path regardless of transport mode. TODO(i2p-ws-verify).
+ * WebSocket connections over I2P are supported via `NativeI2pWsSocket`, which
+ * uses the `ws_open_i2p` Tauri command implemented in i2p.rs.
  */
 export async function i2pRequest(
   method: string,
@@ -112,6 +112,103 @@ export class NativeWsSocket {
         }
       };
       const id = await invoke<number>("ws_open", { token, onEvent: channel });
+      this.id = id;
+      if (this.closed) {
+        void this.close();
+        return;
+      }
+      // Flush anything queued before the connection id arrived.
+      for (const data of this.sendQueue.splice(0)) {
+        void invoke("ws_send", { id, data });
+      }
+    } catch {
+      this.readyState = 3;
+      this.onerror?.();
+      this.onclose?.();
+    }
+  }
+
+  send(data: string): void {
+    if (this.id == null) {
+      this.sendQueue.push(data);
+      return;
+    }
+    const id = this.id;
+    void core().then(({ invoke }) => invoke("ws_send", { id, data }));
+  }
+
+  close(): void {
+    this.closed = true;
+    this.readyState = 3;
+    const id = this.id;
+    if (id != null) {
+      void core().then(({ invoke }) => invoke("ws_close", { id }));
+    }
+  }
+}
+
+/**
+ * A minimal `WebSocket`-shaped wrapper over the native I2P WebSocket commands
+ * (`ws_open_i2p`/`ws_send`/`ws_close`).
+ *
+ * Connections are established by tunneling through the local i2pd HTTP proxy at
+ * 127.0.0.1:4444 via HTTP CONNECT to the target `.b32.i2p` destination. Because
+ * I2P provides its own transport-layer encryption, the Rust side uses a `ws://`
+ * URL rather than `wss://` — adding TLS on top of I2P is redundant and i2pd's
+ * HTTP proxy does not support CONNECT-then-TLS to garlic destinations.
+ *
+ * Verified end-to-end on 2026-07-02 against a live i2pd + relay server tunnel:
+ * i2pd's HTTP proxy accepts `CONNECT <b32>:80`, two authenticated sessions
+ * upgraded (101), a message round-tripped, and both connections survived 60s
+ * idle across a server ping cycle.
+ *
+ * The `token` passed here is forwarded to the `ws_open_i2p` Tauri command, which
+ * puts it in the `?token=` query param (the server's native-client auth path),
+ * NOT `Sec-WebSocket-Protocol`. The Rust WebSocket client (tungstenite) fails
+ * the handshake when it requests a subprotocol the server does not echo back,
+ * which the browser `WebSocket` tolerates but tungstenite does not.
+ *
+ * NOTE: {@link NativeWsSocket} (the clearnet/Tor `ws_open` command) still passes
+ * the token via `Sec-WebSocket-Protocol` and so hits this same tungstenite
+ * failure — its query-param fix is pending review (see TODO(ws-open-subproto)),
+ * kept separate from this I2P change per the change's scope.
+ *
+ * Implements the same `WsClient` surface as {@link NativeWsSocket} —
+ * `readyState`, the `on*` handlers, `send`, `close` — so it is a drop-in
+ * replacement for the I2P transport path.
+ */
+export class NativeI2pWsSocket {
+  static readonly OPEN = 1;
+  readyState = 0; // CONNECTING
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  private id: number | null = null;
+  private closed = false;
+  private sendQueue: string[] = [];
+
+  constructor(token: string) {
+    void this.open(token);
+  }
+
+  private async open(token: string): Promise<void> {
+    try {
+      const { invoke, Channel } = await core();
+      const channel = new Channel<WsEvent>();
+      channel.onmessage = (ev: WsEvent) => {
+        if (ev.kind === "open") {
+          this.readyState = 1; // OPEN
+          this.onopen?.();
+        } else if (ev.kind === "message") {
+          this.onmessage?.({ data: ev.data });
+        } else {
+          this.readyState = 3; // CLOSED
+          this.onclose?.();
+        }
+      };
+      const id = await invoke<number>("ws_open_i2p", { token, onEvent: channel });
       this.id = id;
       if (this.closed) {
         void this.close();

@@ -514,9 +514,20 @@ Append one entry per agent run. Do not overwrite prior runs.
   REST via `i2p_request` (reqwest with `Proxy::http("http://127.0.0.1:4444")`) is unaffected —
   reqwest routes the full URL to the proxy in proxy-form HTTP, bypassing DNS. WS has no equivalent.
 
-- **B32 destination confirmed live:**
-  `hgzwylzozn2g2krv372je6nc7obzp2z4yfrgfwnnuwsezjilkvha.b32.i2p` — readable from i2pd web
-  console at 127.0.0.1:7070. Stored in `.env` as `I2P_EEPSITE_DEST`.
+- **B32 destination confirmed live:** ~~`hgzwylzozn2g2krv372je6nc7obzp2z4yfrgfwnnuwsezjilkvha.b32.i2p`~~
+  **CORRECTION (Run 5, 2026-07-02): this claim was a FALSE POSITIVE.** That address was the
+  transient shared local destination of the i2pd Docker image's *default client proxies* (HTTP
+  proxy/SOCKS on 4444/4447), not a server tunnel. The `purplei2p/i2pd` entrypoint runs with only
+  `--datadir=/home/i2pd/data`, so it read the image's default config from the datadir and silently
+  ignored both files mounted at `/etc/i2pd/` — the `[sublemonable-relay]` server tunnel was never
+  loaded, no `sublemonable-relay.dat` key existed, and nothing forwarded to `server:8443`. The
+  `grep -oP '[a-z2-7]+\.b32\.i2p' | head -1` verification matched the first b32 on the console
+  page, which was the client proxies' destination. Fixed in Run 5 by passing explicit
+  `command: --conf=/etc/i2pd/i2pd.conf --tunconf=/etc/i2pd/tunnels.conf` in
+  `docker-compose.i2p.yml`. The real, persistent server-tunnel destination is
+  `y5ac5zowrbpz5schj4hq5fme32ranttmkrtbqg3zjnw6k5wogppq.b32.i2p` (key: `sublemonable-relay.dat`,
+  backed up). `.env` corrected. The two `hgzwylzozn…` values in the Tests-run block below are the
+  historical (wrong) outputs, kept verbatim for the record.
 
 - **Tests run:**
   - command: `curl -s 'http://127.0.0.1:7070/?page=i2p_tunnels' -H 'Host: localhost' | grep -oP '[a-z2-7]{52,}\.b32\.i2p'`; exit_code: 0; summary: B32 returned — tunnel is live; timestamp: 2026-07-02T12:43Z.
@@ -542,3 +553,112 @@ Append one entry per agent run. Do not overwrite prior runs.
 
 - **Next action:** Implement `ws_open_i2p` with HTTP CONNECT tunneling and test on a live I2P
   network with i2pd running locally on the desktop machine.
+
+---
+
+## Run 5 — I2P WS live, i2pd config correction, APK v1.5.0-beta, .deb verification (2026-07-02)
+
+Multi-track session (Phase 0/1 sequential, then Tracks A–D). Nothing committed or pushed;
+`packages/crypto/vault.ts` and existing connection modes untouched per instruction.
+
+### Phase 0 — credential hygiene: CONFIRMED
+- Old GitHub PAT `ghp_xjsyS…` tested against `api.github.com/user` → **HTTP 401** (revoked, not merely unused).
+- `grep ghp_` across `~/.bash_history` and `~/.config` → no matches. Remote is SSH
+  (`git@github.com:jackofall1232/sublemonable.git`), no token-in-URL.
+
+### Phase 1 — i2pd server tunnel: FALSE-POSITIVE FOUND AND CORRECTED
+- **The `hgzwylzozn…b32.i2p` address recorded in Run 4 was wrong** — it was the i2pd Docker
+  image's *default client-proxy* destination, not our server tunnel. The `purplei2p/i2pd`
+  entrypoint runs `i2pd --datadir=/home/i2pd/data` and silently ignored the `i2pd.conf` /
+  `tunnels.conf` mounted at `/etc/i2pd/`, so `[sublemonable-relay]` was never created.
+- **Fix:** added `command: --conf=/etc/i2pd/i2pd.conf --tunconf=/etc/i2pd/tunnels.conf` to
+  `docker-compose.i2p.yml`. Real, persistent server-tunnel destination is now
+  **`y5ac5zowrbpz5schj4hq5fme32ranttmkrtbqg3zjnw6k5wogppq.b32.i2p`**.
+- `.env` `I2P_EEPSITE_DEST` corrected; server recreated with `up -d server` (not `restart`);
+  `/healthz` confirms the new `i2p_dest`. Run 4 addendum corrected in place (struck through).
+- **Key backup:** `sublemonable-relay.dat` (679 B) extracted to `~/onion-key-backup/`, md5
+  `d955cd32…` matches in-container. Three Tor `hs_ed25519_secret_key` files (96 B each)
+  re-staged alongside. No stale/wrong key file exists (the transient destination never
+  persisted a key).
+
+### Track A — ws_open_i2p (WS-over-I2P): IMPLEMENTED + LIVE-VERIFIED, TODO(i2p-ws-verify) CLOSED
+- New `ws_open_i2p` Tauri command: TCP→i2pd proxy 4444 → `CONNECT <b32>:80` → byte-by-byte
+  header read (4 KiB cap, exact `HTTP/1.x 200` token check) → `client_async_with_config` over
+  the raw tunnel with `ws://` (no TLS, §4). `WsRegistry` fields made `pub(crate)` so the I2P
+  socket shares `ws_send`/`ws_close`. `ws_open` (clearnet/Tor) left byte-for-byte unchanged.
+- **Advisor (Opus 4.8) review → APPROVE-WITH-CHANGES; both blockers fixed:**
+  1. Relay i2pd tunnel changed `type = http` → **`type = server`** (raw TCP). An http-type
+     tunnel rewrites inbound HTTP and mangles the post-101 WebSocket frame stream; the Go
+     server depends on no injected headers, so the raw pipe carries REST + WS identically.
+  2. Added **30 s timeouts** on connect / CONNECT-read / WS-handshake (i2pd accepts the local
+     TCP immediately but can stall the 200 during tunnel build → would hang UI in CONNECTING).
+- **Third failure found empirically and fixed — auth path:** tungstenite 0.24 fails the
+  handshake with `"Server sent no subprotocol"` when it requests a `Sec-WebSocket-Protocol`
+  the server does not echo, and the gofiber server never echoes. Switched `ws_open_i2p` to the
+  server's documented **`?token=` query-param** native-client auth path. **This bug is
+  transport-independent** — reproduced against the plain local server with no I2P
+  (`examples/ws_subproto_diag.rs`: header→FAIL, query-param→OK 101) — so the existing
+  clearnet/Tor `ws_open` carries the same latent bug. Left unchanged per scope; tracked as
+  **TODO(ws-open-subproto)** pending explicit approval.
+- **Live test (`examples/i2p_ws_live_test.rs`, real exit 0), two authenticated sessions over
+  the live i2pd + relay tunnel:**
+  - both dialed their own CONNECT tunnel (i2pd returns `HTTP/1.1 200`) and upgraded → **101**;
+  - `message.send` A→B round-tripped through the hub → B got `message.deliver` (matching id);
+  - both connections **survived 60 s idle** across one server ping cycle (each saw a ping ~50 s,
+    auto-ponged);
+  - **post-idle** A→B message round-tripped (no silent drop).
+- Clean `cargo build --lib` (zero warnings). Web `tsc` passes. Docs updated:
+  `TOR_ARCHITECTURE.md §7` (WS-over-I2P now verified, TODO closed), `i2p.rs` + `nativeTransport.ts`
+  doc comments.
+
+### Track B — Android APK v1.5.0-beta: REBUILT, SIGNED, STAGED, MIRRORS VERIFIED
+- Prior agent left an inconsistent staging (stale 1.0.0 APK named v1.0.0-beta; index referenced
+  v1.5.0-beta). Discarded and rebuilt cleanly.
+- `assembleRelease` with `RELAY_ONION_ADDRESS` set; `versionCode 2 / versionName 1.5.0-beta`
+  confirmed **inside** the artifact via `aapt2 dump badging`; onion address string confirmed
+  present in `classes.dex` (proguard keeps `BuildConfig` so R8 doesn't strip it). No I2P dest
+  baked into Android (mobile I2P is a documented future item).
+- zipalign + apksigner (release key); signature verifies v2+v3, signer cert SHA-256
+  `6c7f92a7…` matches the existing release key.
+- Staged `onion-site/sublemonable-v1.5.0-beta.apk`, regenerated `SHA256SUMS`
+  (`16993e8d…`), removed stale v1.0.0 APK. Both mirrors (public + secret Host headers) render
+  the real download link `/sublemonable-v1.5.0-beta.apk`; APK downloads over the mirror route
+  with matching SHA-256.
+
+### Track C — desktop .deb: install PASS, launch PASS, Tor-by-default PASS (app-level)
+- CI target exists: `.github/workflows/ci.yml` `desktop-linux` job on **ubuntu-22.04** builds
+  deb/appimage/rpm. CI artifacts unreachable (no gh/token) → built locally as sanctioned
+  substitute: `Sublemonable_1.0.0_amd64.deb`, ~6.3 MB, build exit 0.
+- Disposable-container verification (`docker run --rm`):
+  - **Install:** PASS on both debian:bookworm and ubuntu:24.04 (exit 0, `/usr/bin/sublemonable-desktop`).
+  - **Launch:** on **ubuntu:24.04** (glibc 2.39) all runs alive past 20 s under xvfb; on
+    debian:bookworm the *locally-built* binary fails with `GLIBC_2.39 not found` — a
+    **build-host artifact** (built on Ubuntu 26.04 / glibc 2.43), NOT a packaging defect;
+    `objdump -T` floor is ≤2.39 and CI's ubuntu-22.04 build (glibc 2.35) would run on bookworm.
+  - **Tor-by-default:** PASS at the app level — `tor.rs` logged `No Tor SOCKS proxy reachable`
+    with tor down and **`Tor SOCKS proxy reachable — routing Tor-first port=9050`** with tor up
+    (run2 + run3); relay onion `/healthz` returned **HTTP 200** through the container's SOCKS.
+
+### Track D — release keystore: VERIFIED + STAGED (awaiting user off-box pull)
+- `/root/sublemonable-release.jks` verified real release key via keytool: `PrivateKeyEntry`,
+  alias `sublemonable`, `CN=Sublemonable Beta`, valid to 2053; cert SHA-256 `6c7f92a7…` matches
+  the APK signer. Copied (not moved) to `~/onion-key-backup/sublemonable-release.jks` +
+  `…-info.txt` (chmod 600). On-server original untouched.
+- **NOT complete** until the user confirms the off-box scp pull. Pull paths:
+  `/root/onion-key-backup/sublemonable-release.jks` and `…/sublemonable-release-keystore-info.txt`.
+
+### Changed files (uncommitted)
+- `docker-compose.i2p.yml` (explicit --conf/--tunconf), `i2p/tunnels.conf` (type=server), `.env`
+  (corrected I2P dest), `apps/desktop/src-tauri/src/i2p.rs` (ws_open_i2p + query-param + timeouts),
+  `apps/desktop/src-tauri/src/transport.rs` (WsRegistry pub(crate)),
+  `apps/web/src/lib/nativeTransport.ts` (NativeI2pWsSocket + docs),
+  `docs/TOR_ARCHITECTURE.md §7`, `apps/android/app/build.gradle.kts` (v1.5.0-beta),
+  `apps/android/app/proguard-rules.pro` (keep BuildConfig), `onion-site/` (index+SHA256SUMS+APK),
+  new `apps/desktop/src-tauri/examples/{i2p_ws_live_test,ws_subproto_diag}.rs`.
+
+### Next / still open
+- **TODO(ws-open-subproto):** apply the same `?token=` query-param fix to clearnet/Tor `ws_open`
+  — needs explicit approval (gated: "do not change existing connection modes").
+- **Release keystore off-box pull** — awaiting user confirmation.
+- **.deb glibc portability** — release builds should come from CI (ubuntu-22.04), not this host.
+- Mobile I2P (no SDK) and external Tor Browser §10 checklist remain future items.

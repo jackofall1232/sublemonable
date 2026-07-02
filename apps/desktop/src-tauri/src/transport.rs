@@ -144,10 +144,13 @@ pub struct PinnedHttp(pub reqwest::Client);
 pub struct PinnedTls(pub Arc<ClientConfig>);
 
 /// Live WebSocket connections, keyed by an opaque id handed back to the UI.
+/// Fields are `pub(crate)` so `i2p::ws_open_i2p` can register its connections
+/// in the same registry — `ws_send`/`ws_close` then work identically for
+/// pinned-TLS and I2P-tunneled sockets.
 #[derive(Default)]
 pub struct WsRegistry {
-    next_id: AtomicU64,
-    conns: Mutex<HashMap<u64, mpsc::UnboundedSender<String>>>,
+    pub(crate) next_id: AtomicU64,
+    pub(crate) conns: Mutex<HashMap<u64, mpsc::UnboundedSender<String>>>,
 }
 
 /// Build the pinned reqwest client. `https_only` rejects any accidental plain

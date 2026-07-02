@@ -64,6 +64,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             i2p::check_i2p_connectivity,
             i2p::i2p_request,
+            i2p::ws_open_i2p,
             keystore::store_vault,
             keystore::load_vault,
             keystore::delete_vault,

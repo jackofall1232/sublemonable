@@ -181,24 +181,50 @@ target URL's host against this constant before routing. No TLS: the `.b32.i2p`
 address is the cryptographic identity of the destination (same principle as §4 —
 authentication happens at the I2P layer).
 
-**WS-over-I2P: confirmed blocked (two layered failures, both verified against live
-code):**
+**WS-over-I2P: implemented and verified end-to-end (2026-07-02).**
 
-1. **Library has no proxy support.** `tokio_tungstenite::connect_async_tls_with_config()`
-   connects directly to the URL's hostname via DNS — no proxy features exist in
-   `tokio-tungstenite = "0.24"` (features: `connect`, `rustls-tls-webpki-roots`
-   only). No configuration change can route it through `127.0.0.1:4444`.
+The original blocker was that `tokio-tungstenite = "0.24"` has no HTTP-proxy
+support — `connect_async_tls_with_config()` connects directly to the URL hostname
+via DNS, and `.b32.i2p` is not DNS-resolvable, so it can never reach the i2pd
+proxy on `127.0.0.1:4444`. This is now solved in the `ws_open_i2p` Tauri command
+by doing the proxy step manually:
 
-2. **`.b32.i2p` is not resolvable via standard DNS.** The connection attempt fails
-   at DNS resolution before any proxy could intercept it.
+1. `TcpStream::connect("127.0.0.1:4444")` to the local i2pd HTTP proxy.
+2. Write `CONNECT <b32>:80 HTTP/1.1\r\nHost: <b32>\r\n\r\n`; read the response
+   byte-by-byte until `\r\n\r\n` (4 KiB cap) and require an `HTTP/1.x 200` status
+   token. i2pd's HTTP proxy **does** accept `CONNECT` to a `.b32.i2p` destination
+   (verified live — returns `HTTP/1.1 200`).
+3. Hand the raw tunnel stream to `tokio_tungstenite::client_async_with_config()`
+   with a `ws://` URL (no TLS — I2P is the transport-security layer, §4). Each
+   dial step is bounded by a 30 s timeout so a slow tunnel build rejects the
+   promise instead of hanging in `CONNECTING`.
 
-The fix requires implementing HTTP CONNECT tunneling in Rust before the WebSocket
-handshake: `TcpStream::connect("127.0.0.1:4444")` → `CONNECT <b32>:80 HTTP/1.1`
-→ `200 Connection established` → pass the resulting stream to
-`tokio_tungstenite::client_async_with_config()`. This is implementable but is
-non-trivial new code requiring its own testing pass on a live I2P network.
-`TODO(i2p-ws-verify)` in `i2p.rs` is **not closed**. WebSocket falls back to the
-Tor/clearnet `ws_open` command until this is implemented and verified.
+**Server tunnel type.** The relay's i2pd server tunnel is `type = server` (raw
+TCP pipe), **not** `type = http`. An `http`-type tunnel parses and rewrites the
+inbound HTTP request and would mangle the post-`101` WebSocket frame stream; the
+raw pipe carries REST and WebSocket bytes identically. The Go server reads the
+client-sent `Host` (a `.b32.i2p` name never matches `isMirrorHost`, so API
+routing is unchanged) and depends on no tunnel-injected headers.
+
+**Auth path.** The native client passes the access token via the `?token=`
+query param (the server's documented native-client path), not
+`Sec-WebSocket-Protocol`. tungstenite 0.24 fails the handshake when it requests a
+subprotocol the server does not echo back (`"Server sent no subprotocol"`), and
+the gofiber server never echoes one; browsers tolerate the missing echo, so the
+browser WS path keeps using the subprotocol header. This failure is
+transport-independent — it was reproduced against the plain local server with no
+I2P involved — so the existing clearnet/Tor `ws_open` command carries the same
+latent bug and needs the same one-line query-param fix. That change is tracked as
+`TODO(ws-open-subproto)` and is **not** yet applied, to keep this I2P change
+scoped.
+
+**Verification (2026-07-02, live i2pd + relay server tunnel).** Two authenticated
+sessions each dialed over their own I2P CONNECT tunnel and both upgraded (HTTP
+`101`); a `message.send` from A round-tripped through the server hub and was
+delivered to B (`message.deliver`, matching envelope id); both connections
+survived 60 s idle across one server ping cycle (each saw a server ping at ~50 s
+and auto-ponged); and a post-idle message round-tripped, confirming neither side
+silently dropped. `TODO(i2p-ws-verify)` is **closed**.
 
 ### Mobile (iOS, Android) — blocked
 
