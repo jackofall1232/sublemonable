@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "max_iterations": 10,
+  "current_iteration": 1,
+  "stop_conditions": [
+    "definition_of_done_met",
+    "blocked",
+    "human_review_required",
+    "max_iterations_reached"
+  ],
+  "human_review_gates": [
+    "before executing destructive operations",
+    "before touching packages/crypto/vault.ts or its storage wiring",
+    "before changing architecture or security boundaries",
+    "before any server/deploy/key-generation step (see todos.md operational section)",
+    "before declaring completion"
+  ],
+  "last_run_time": null,
+  "completion_status": "in_progress",
+  "should_continue": false,
+  "pause_reason": "Code and memory changes complete for this pass; operational deploy steps require human server/build access and are recorded in todos.md, not executed here."
+}

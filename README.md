@@ -60,7 +60,8 @@ Five layered defenses, each built as if the one beneath it has already failed:
 - 📨 **Dead-drop mode** — anonymous, account-free message deposit; no metadata links the two parties
 - 🌫️ **Decoy traffic** — continuous cover traffic makes a real send indistinguishable from idle
 - 🔀 **Multi-hop relay** — 3-hop onion routing; no single relay knows both ends
-- 🧅 **Tor-first** — Tor by default, clearnet only as a flagged fallback
+- 🧅 **I2P-first** — I2P is the primary transport (still in development — Tor is the active
+  fallback today), clearnet only as a flagged last resort
 - 👻 **Standard / Stealth / Ghost** connection modes
 - 🍋 **Privacy view** — frosted-lemon blur until you reveal, for shoulder-surfing defense
 
@@ -68,13 +69,13 @@ See [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) for the full onion diagram.
 
 ## Platforms
 
-| Platform | Stack | Path |
-| --- | --- | --- |
-| Browser | React 18 + Vite, PWA | [`apps/web`](apps/web) |
-| iOS 16+ | SwiftUI + libsignal-client | [`apps/ios`](apps/ios) |
-| Android 8+ | Jetpack Compose + libsignal-client | [`apps/android`](apps/android) |
+| Platform                   | Stack                                | Path                           |
+| -------------------------- | ------------------------------------ | ------------------------------ |
+| Browser                    | React 18 + Vite, PWA                 | [`apps/web`](apps/web)         |
+| iOS 16+                    | SwiftUI + libsignal-client           | [`apps/ios`](apps/ios)         |
+| Android 8+                 | Jetpack Compose + libsignal-client   | [`apps/android`](apps/android) |
 | Linux (Debian/Ubuntu/Kali) | Tauri v2 + Rust, .deb/.AppImage/.rpm | [`apps/desktop`](apps/desktop) |
-| Server | Go 1.25+ · Fiber · PostgreSQL 16 | [`server`](server) |
+| Server                     | Go 1.25+ · Fiber · PostgreSQL 16     | [`server`](server)             |
 
 ## Getting started
 

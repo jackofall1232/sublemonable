@@ -5,9 +5,22 @@
 // Release build configuration.
 //
 // The relay onion address is NEVER published or committed. It is injected from
-// the build environment (RELAY_ONION_ADDRESS) at build time so the relay hidden
-// service stays out of the source tree. Add a matching RELAY_ONION_ADDRESS entry
-// to Info.plist (value: $(RELAY_ONION_ADDRESS)) and read it in Swift via
+// the build environment at build time so the relay hidden service stays out of
+// the source tree.
+//
+// Deliberately NOT set here as "RELAY_ONION_ADDRESS = $(RELAY_ONION_ADDRESS)" —
+// that line was self-referential (a build setting defined in terms of itself,
+// with no other source to resolve against) and evaluated to empty/unresolved
+// regardless of the environment. Xcode already exposes a process environment
+// variable as a build setting of the same name when no xcconfig/project setting
+// shadows it, so the correct way to inject the value is to export it in the
+// environment that invokes the build, e.g.:
+//
+//   RELAY_ONION_ADDRESS=<relay>.onion xcodebuild -project Sublemonable.xcodeproj \
+//     -scheme Sublemonable -configuration Release archive ...
+//
+// Support/Info.plist reads it via a RELAY_ONION_ADDRESS key set to
+// "$(RELAY_ONION_ADDRESS)", substituted from that build setting at build time;
+// Swift reads the resulting value via RelayConfig.onionAddress
+// (Sources/Networking/RelayConfig.swift), which wraps
 // Bundle.main.infoDictionary["RELAY_ONION_ADDRESS"]. Empty when unset.
-
-RELAY_ONION_ADDRESS = $(RELAY_ONION_ADDRESS)
