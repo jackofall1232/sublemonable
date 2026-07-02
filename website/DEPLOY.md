@@ -32,10 +32,10 @@ The unlisted page `/download/beta` links to a GitHub Release asset. To publish a
 1. Build the **release** APK (with the `relay.sublemonable.com` certificate pin compiled in — see
    `docs/SELF_HOSTING.md`).
 2. Create a GitHub pre-release with tag matching `ANDROID_BETA_VERSION` in `src/lib/links.ts`
-   (default `v1.0.0-beta`) and upload the APK named `sublemonable-<tag>.apk`.
+   (currently `v1.5.0-beta`) and upload the APK named `sublemonable-<tag>.apk`.
 3. Compute the checksum and paste it into `ANDROID_BETA_SHA256` in `src/lib/links.ts`:
    ```bash
-   sha256sum sublemonable-v1.0.0-beta.apk
+   sha256sum sublemonable-v1.5.0-beta.apk
    ```
 4. Commit and push — Vercel redeploys, and the page shows the live download + checksum.
 

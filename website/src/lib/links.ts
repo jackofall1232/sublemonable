@@ -16,8 +16,15 @@ export const GITHUB_ISSUES = `${GITHUB_URL}/issues`;
 // ANDROID_BETA_APK_URL, and paste the asset's SHA-256 into ANDROID_BETA_SHA256
 // (`sha256sum <file>`). Remove this block and the /download/beta page once the
 // app ships to the Play Store.
-export const ANDROID_BETA_VERSION = "v1.0.0-beta";
+export const ANDROID_BETA_VERSION = "v1.5.0-beta";
 export const ANDROID_BETA_APK_URL = `${GITHUB_URL}/releases/download/${ANDROID_BETA_VERSION}/sublemonable-${ANDROID_BETA_VERSION}.apk`;
-// 64 hex chars once filled in; the page shows a "pending" note until then.
-export const ANDROID_BETA_SHA256 = "3091c7ae1c88a02fd5bf79033125b23148477c7800392e90a64939e20d2ded10";
+// 64 hex chars. Must be byte-identical to onion-site/SHA256SUMS — both surfaces
+// must serve the same binary. Verify: sha256sum onion-site/sublemonable-v1.5.0-beta.apk
+export const ANDROID_BETA_SHA256 = "16993e8d1beb42b2e2888113631db779d060755afc027abd8885ee4e73f10a5e";
 export const ANDROID_BETA_MIN_OS = "Android 8.0 (Oreo)";
+
+// ── Tor download mirror ───────────────────────────────────────────────────────
+// Public .onion address for the APK download mirror (served by the Tor hidden
+// service overlay). This is the publicly-published address — never the relay or
+// secret mirror addresses, which are never rendered into any public page.
+export const PUBLIC_MIRROR_ONION = "wyymleg2e3mdhib4twyu7bgofyxbtoj52jfycc4ihqc7atapxyj3kuqd.onion";

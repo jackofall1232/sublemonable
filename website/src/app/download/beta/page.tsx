@@ -12,6 +12,7 @@ import {
   ANDROID_BETA_SHA256,
   ANDROID_BETA_VERSION,
   GITHUB_ISSUES,
+  PUBLIC_MIRROR_ONION,
 } from "@/lib/links";
 
 // Unlisted: shared by direct link with testers only, and kept out of search
@@ -52,22 +53,52 @@ export default function AndroidBetaPage() {
 
         {/* Download */}
         <section className="mt-12">
-          <a
-            href={ANDROID_BETA_APK_URL}
-            className="inline-flex items-center gap-3 rounded-md border border-line bg-bg-elevated px-6 py-4 text-left transition duration-base ease-brand hover:border-lemon hover:text-lemon"
-          >
-            <LemonSlice size={32} label="" />
-            <span>
-              <span className="block font-mono text-[10px] uppercase tracking-wide text-ink-muted">
-                Direct download · {ANDROID_BETA_MIN_OS}+
+          <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
+            {/* Clearnet download */}
+            <a
+              href={ANDROID_BETA_APK_URL}
+              className="inline-flex items-center gap-3 rounded-md border border-line bg-bg-elevated px-6 py-4 text-left transition duration-base ease-brand hover:border-lemon hover:text-lemon"
+            >
+              <LemonSlice size={32} label="" />
+              <span>
+                <span className="block font-mono text-[10px] uppercase tracking-wide text-ink-muted">
+                  Direct download · {ANDROID_BETA_MIN_OS}+
+                </span>
+                <span className="block font-display text-lg font-semibold text-ink-primary">
+                  Download .apk ({ANDROID_BETA_VERSION})
+                </span>
               </span>
-              <span className="block font-display text-lg font-semibold text-ink-primary">
-                Download .apk ({ANDROID_BETA_VERSION})
-              </span>
-            </span>
-          </a>
+            </a>
+          </div>
 
-          {/* Checksum */}
+          {/* Tor mirror callout */}
+          <div className="mt-6 rounded-md border border-line bg-bg-elevated p-5">
+            <p className="font-display text-sm font-semibold text-ink-primary">
+              Want stronger anonymity? Use the Tor mirror.
+            </p>
+            <p className="mt-2 leading-relaxed text-ink-secondary">
+              Downloading over clearnet reveals your IP address to anyone monitoring connections to{" "}
+              <span className="text-ink-primary">sublemonable.com</span>. The Tor onion mirror
+              serves the same APK — same binary, same checksum — without exposing your IP. Open the
+              address below in{" "}
+              <a
+                href="https://www.torproject.org/download/"
+                className="text-lemon underline decoration-lemon/40 underline-offset-4 transition duration-base hover:decoration-lemon"
+              >
+                Tor Browser
+              </a>
+              :
+            </p>
+            <pre className="mt-3 overflow-x-auto rounded-md border border-line bg-bg-secondary p-3 font-mono text-sm text-pulp">
+              <code>{`http://${PUBLIC_MIRROR_ONION}/sublemonable-${ANDROID_BETA_VERSION}.apk`}</code>
+            </pre>
+            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+              The APK served there is identical to the direct download — verify with the same
+              checksum below regardless of which path you use.
+            </p>
+          </div>
+
+          {/* Checksum — single source of truth for both download paths */}
           <div className="mt-6">
             <p className="font-mono text-[11px] uppercase tracking-wide text-ink-muted">
               SHA-256 checksum
