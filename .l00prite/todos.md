@@ -2,22 +2,24 @@
 
 ## Next
 
-- [ ] Bring up the I2P overlay and read the relay B32 destination (see `docker-compose.i2p.yml`
-      and `docs/SELF_HOSTING.md` §"Optional I2P relay transport"):
-      `docker compose -f docker-compose.yml -f docker-compose.i2p.yml up -d`
-      then `curl -s 'http://127.0.0.1:7070/?page=i2p_tunnels' | grep -oP '[a-z2-7]+\.b32\.i2p' | head -1`
-- [ ] Set `I2P_ENABLED=true`, `I2P_EEPSITE_DEST=<b32>` in `.env`; restart server with
-      `docker compose -f docker-compose.yml -f docker-compose.i2p.yml up -d server`.
-- [ ] Build desktop with `RELAY_I2P_DEST=<b32>` set: `export RELAY_I2P_DEST=<b32> && pnpm tauri build`.
-- [ ] Back up `i2p-data` volume (specifically `sublemonable-relay.dat`) alongside the Tor hidden
-      service keys and JWT keys — see `docs/SELF_HOSTING.md` §"Back up your I2P destination key".
-- [ ] Empirically verify REST routing over I2P on desktop: with i2pd running and `RELAY_I2P_DEST`
-      set, confirm the app routes REST calls through `i2p_request` and receives valid API responses.
-- [ ] Investigate `TODO(i2p-ws-verify)` in `i2p.rs` — test WebSocket upgrade through i2pd HTTP
-      proxy to a `.b32.i2p` destination. If i2pd's HTTP proxy does not support CONNECT for WS
-      upgrade, document alternative (SAM bridge or tokio HTTP CONNECT implementation) and flag
-      to operator before declaring WS-over-I2P done.
-- [ ] Get this branch reviewed and merged.
+- [ ] **TODO(ws-open-subproto) — needs explicit approval.** The clearnet/Tor `ws_open`
+      command (`transport.rs`) still passes the token via `Sec-WebSocket-Protocol`, which
+      tungstenite 0.24 rejects when the server doesn't echo it back (`"Server sent no
+      subprotocol"`). Proven transport-independent this session (`examples/ws_subproto_diag.rs`:
+      header→FAIL, `?token=`→OK 101). Same one-line fix as `ws_open_i2p` (switch to the
+      `?token=` query param). Left unchanged because "do not change existing connection modes"
+      was gated — get sign-off, then apply and live-test the clearnet/Tor WS path.
+- [ ] **Release keystore off-box pull (pending user).** `~/onion-key-backup/sublemonable-release.jks`
+      + `…-info.txt` are staged; scp them off-box and confirm. Not a real backup until pulled.
+      Same for `~/onion-key-backup/sublemonable-relay.dat` (I2P dest key) and the three Tor
+      `hs_ed25519_secret_key` files staged alongside.
+- [ ] **.deb glibc portability.** Release `.deb`s must come from CI (`desktop-linux` job builds
+      on ubuntu-22.04 / glibc 2.35). A local build on this host (Ubuntu 26.04 / glibc 2.43) floors
+      the binary at GLIBC_2.39 and won't run on debian:bookworm. Not a packaging defect; just
+      never ship a locally-built .deb.
+- [ ] Clean up the throwaway `i2p-test-client` i2pd container when I2P WS testing is done
+      (`docker rm -f i2p-test-client`). It provided the desktop-side proxy on 4444 for the live test.
+- [ ] Get `main` reviewed (pushed as `a942173`); decide on TODO(ws-open-subproto) before release.
 
 ## Later — operational deploy steps (require server/build access outside a coding session)
 
@@ -70,11 +72,23 @@ they need real infrastructure access, signing keys, and a human decision point:
       in-process embedding; requires same class of SDK work as Guardian Project's `Tor.framework`/
       `tor-android`. `detectI2P()` is an honest stub on mobile; the chain falls correctly to Tor.
       Do NOT mark as done until a real SDK is embedded. See `docs/V1_5_STATUS.md`.
-- [ ] **WS-over-I2P** (`TODO(i2p-ws-verify)` in `apps/desktop/src-tauri/src/i2p.rs`) — requires
-      empirical testing on a live I2P network. `i2p_request` (REST) is the confirmed-working path.
-      Do NOT mark as done without live verification.
-
 ## Done
+
+- [x] (Run 5 / 2026-07-02) **WS-over-I2P live-verified** — `ws_open_i2p` (HTTP CONNECT tunneling
+      through i2pd 4444, `type=server` tunnel, 30s timeouts, `?token=` auth). Two authed sessions
+      upgraded 101, message round-trip, 60s idle survival, post-idle round-trip.
+      `TODO(i2p-ws-verify)` closed; §7 updated. (Follow-up: TODO(ws-open-subproto) for clearnet/Tor.)
+- [x] (Run 5) Corrected the i2pd config gotcha — `docker-compose.i2p.yml` now passes
+      `--conf/--tunconf`; real server-tunnel dest `y5ac5zowrbpz…b32.i2p` (Run 4's `hgzwylzozn…`
+      was the default client-proxy dest, a false positive — corrected in ledger + `.env`).
+      `sublemonable-relay.dat` backed up to `~/onion-key-backup/`.
+- [x] (Run 5) Android release rebuilt **v1.5.0-beta** (versionCode 2) with `RELAY_ONION_ADDRESS`
+      baked in (verified in dex; proguard keeps BuildConfig), signed with release key, staged in
+      `onion-site/` with regenerated SHA256SUMS; both mirror pages verified.
+- [x] (Run 5) Desktop `.deb` verified in disposable containers — install PASS, launch PASS
+      (ubuntu:24.04), Tor-first-by-default PASS at app level (`tor.rs` logs + onion HTTP 200).
+- [x] (Run 5) Release keystore verified as the real signing key and staged for off-box pull
+      (awaiting user confirmation — see Next).
 
 - [x] (Run 1) Populated `.l00prite/` memory from existing docs — no fresh `/build-loop`
       scaffolding run.
