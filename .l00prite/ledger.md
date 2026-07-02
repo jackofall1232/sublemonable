@@ -144,3 +144,68 @@ Append one entry per agent run. Do not overwrite prior runs.
 - **Do-not-retry notes:** None yet.
 - **Lock:** none — this repo's `.l00prite/` has no `lock.json` (not created this run; only the
   files explicitly requested in Phase 1 were written).
+
+---
+
+### Run 2 — claude (review-response round on PR #13)
+- **Goal:** Check for and respond to automated code review on the PR opened for
+  `claude/l00prite-i2p-relay-setup-kdahma` (#13 in `jackofall1232/sublemonable`).
+- **Triggering event:** User request ("make sure you check for reviews") — not a webhook event,
+  a direct check.
+- **Reviewer/comment reference:** PR #13 — gemini-code-assist review (1 inline comment) and
+  copilot-pull-request-reviewer review (4 inline comments), all posted against commit `125c3ce`.
+- **Decision:** All 5 findings were valid (verified against the actual code, not taken at face
+  value) and fixed directly — none required asking the human, none were false positives.
+- **Completed work:**
+  1. **[gemini, high]** `apps/ios/Sources/Networking/ConnectionMode.swift` —
+     `TransportState.clearnetFallback` had no explicit raw value, so Swift would synthesize
+     `"clearnetFallback"` instead of the wire-format `"clearnet_fallback"` `packages/protocol`
+     uses. Currently dead code (nothing decodes/encodes it yet), but the file's own doc comment
+     promises lockstep compatibility, and the file already used this exact explicit-raw-value
+     pattern for the (now-removed) `PreferredTransport` cases. Fixed:
+     `case clearnetFallback = "clearnet_fallback"`.
+  2. **[copilot]** `packages/ui/src/ClearnetWarningBanner.tsx` — real bug, not just a doc nit: the
+     banner hardcoded a stale title ("Tor unavailable — connected via clearnet.") completely
+     independent of `CLEARNET_WARNING.title`/`.body` in `packages/protocol/src/transport.ts`,
+     which Run 1 updated. Confirmed `packages/ui` has no dependency on `@sublemonable/protocol`
+     at all (by design — it duplicates `TransportState` as a local literal type too), so fixed by
+     updating the hardcoded string to match rather than adding a new cross-package import.
+  3. **[copilot]** `packages/protocol/src/transport.ts` header comment referenced `detectI2P()` as
+     if it lived in this package; it's actually in `apps/web/src/lib/transportResolver.ts`. Fixed
+     the comment to point at the right file.
+  4. **[copilot]** `apps/web/src/lib/transportResolver.ts` — inherited-from-before-this-session
+     comment claimed I2P detection "logs intent"; `detectI2P()` is a stub that only returns
+     `false`, no logging anywhere. Removed the inaccurate phrase.
+  5. **[copilot]** `README.md`'s new "I2P-first" bullet said "I2P by default" — technically true
+     of the hierarchy's position but misleading about what's actually protecting the user today
+     (I2P is a v1.5 skeleton; every connection currently resolves through Tor or clearnet).
+     Reworded to say Tor is the active fallback today.
+  - Resolved all 5 review threads on PR #13 after each corresponding fix was pushed.
+- **Fix implemented:** See above — 4 files touched (`ConnectionMode.swift`,
+  `ClearnetWarningBanner.tsx`, `transport.ts`, `transportResolver.ts`, `README.md`), 2 commits.
+- **Changed files:** `apps/ios/Sources/Networking/ConnectionMode.swift`,
+  `packages/ui/src/ClearnetWarningBanner.tsx`, `packages/protocol/src/transport.ts`,
+  `apps/web/src/lib/transportResolver.ts`, `README.md`, this `ledger.md`.
+- **Tests run / Verification:**
+  - command: `pnpm build:packages && pnpm --filter @sublemonable/web typecheck && pnpm -r test`;
+    exit_code: 0; summary: same 69/69 tests green after both fix commits; timestamp: this
+    session, after each of the two commits below.
+  - command: `pnpm --filter @sublemonable/web build`; exit_code: 0; summary: production build
+    still succeeds; timestamp: this session.
+  - command: `npx prettier --check` on every file touched this round; exit_code: 0 (after running
+    `prettier --write` once to fix two formatting violations introduced by the manual edits to
+    `README.md` and `ClearnetWarningBanner.tsx`); summary: clean; timestamp: this session.
+- **Response drafted/sent:** No PR comment posted (fixes speak for themselves per the "be frugal
+  about replies" guidance) — pushed commits `cc859bc` (Gemini finding) and `0dc865f` (4 Copilot
+  findings), then resolved all 5 GitHub review threads via the API.
+- **Event status:** completed.
+- **Failures:** None.
+- **Decisions:** None new beyond Run 1's.
+- **Confidence:** High — every fix was verified against the actual source (not assumed from the
+  review text alone) before being applied, and the full local verification suite re-ran clean
+  after each commit.
+- **Next action:** Watch PR #13's CI (in progress as of this run — TypeScript/Go/Android checks
+  were mid-run at write time, all prior runs on this branch were green) and any further review
+  rounds; otherwise this branch is ready for human merge review.
+- **Do-not-retry notes:** None.
+- **Lock:** none.
