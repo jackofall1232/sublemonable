@@ -823,3 +823,34 @@ Multi-track session (Phase 0/1 sequential, then Tracks A–D). Nothing committed
     computes the delay from the current attempt before incrementing, matching WsClient.
 - **Still unbuilt in my session** (no SDK) — the new CI job is now the first real build; watching
   it via the PR subscription.
+
+#### Addendum — out-of-band identity-key pinning (Codex P2, maintainer-approved)
+- **Finding (Codex, valid):** the scanned/pasted contact QR is a full
+  `ContactExchangePayload`, but Android reduced it to just the UUID and discarded the
+  `identity_key` — so `contactIdentityKeyBase64` stayed null, pre-first-message Verify showed the
+  LOCAL fingerprint, and a user could "verify" without ever comparing the QR's key. iOS keeps the
+  key; Android didn't (pre-existing in the old paste dialog, inherited by the new scanner).
+- **Decision:** user chose the PROPER fix (not the naive carry-only, which would let the relay
+  swap the key on first send after the user verified). This is a sanctioned crypto/verification
+  trust-model change (constraints.md gate — explicit user go-ahead obtained).
+- **Implemented (out-of-band key pinning + mismatch detection):**
+  - `parseContactPayload()` now returns both `account_id` and the optional `identity_key`
+    (`parseContactInput` delegates to it — pinned test unchanged); scanner/paste carry the key
+    through (`scannedIdentityKey` preserves it when the field only shows the UUID).
+  - New `Conversation.pinnedIdentityKeyBase64`; adding from a QR sets both
+    `contactIdentityKeyBase64` (so Verify shows the right safety number immediately) and
+    `pinnedIdentityKeyBase64` (the pin). Bare UUID/link → no pin (TOFU, unchanged).
+  - `MessagingCoordinator.sendText`: on session establishment, if the relay's prekey-bundle
+    identity key ≠ the pinned key, it REFUSES to establish/send and calls
+    `ConversationRepository.flagIdentityMismatch()` (reuses the dormant `keyChanged` field →
+    existing `SecurityState.WARNING` badge in the chat header, verified reset, pinned key KEPT —
+    the relay's substitute is never adopted). Enforced on the outbound bundle-fetch path (the
+    server-substitution vector); inbound is protected by the message's own crypto + libsignal's
+    identity store.
+  - Tests: `parseContactPayload` extracts the key; bare-UUID/link and key-less JSON yield a null
+    pin.
+- **Known/acceptable behavior (noted, not a bug):** on a pin mismatch the in-flight message is
+  dropped (fail-closed) and the WARNING badge is the signal; a legitimate key rotation shows the
+  same warning and is resolved by re-scanning the contact's new QR (re-add updates the pin). A
+  richer "accept new key" flow + a failed-message state are follow-ups, not done here.
+- Still unbuilt in-session (no SDK) — relying on the now-real Android CI job.
