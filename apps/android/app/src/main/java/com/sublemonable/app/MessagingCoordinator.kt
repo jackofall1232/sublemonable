@@ -80,10 +80,18 @@ class MessagingCoordinator(
             }
         }.stateIn(scope, SharingStarted.Eagerly, Connectivity.OFFLINE)
 
-    /** Set when the server revokes our session — UI returns to the lock gate. */
+    /**
+     * Set when the server revokes our session — UI returns to the lock gate.
+     * @Volatile: written on the main thread, invoked from OkHttp callback threads.
+     */
+    @Volatile
     var onForcedLogout: (() -> Unit)? = null
 
-    /** Single-flight guard: only one boot/relink sequence runs at a time. */
+    /**
+     * Single-flight guard: only one boot/relink sequence runs at a time.
+     * @Volatile: read/written from the main thread and OkHttp callback threads.
+     */
+    @Volatile
     private var linkJob: Job? = null
 
     init {
@@ -162,8 +170,10 @@ class MessagingCoordinator(
                 }
                 return
             }
-            attempt += 1
+            // Delay from the CURRENT attempt (0-based) so the first retry waits
+            // the 1s base, not 2s — then advance (matches WsClient's backoff).
             delay(min(MAX_BACKOFF_MS, BASE_BACKOFF_MS shl min(attempt, MAX_BACKOFF_SHIFT)))
+            attempt += 1
         }
     }
 

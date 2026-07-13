@@ -5,6 +5,7 @@
 
 package com.sublemonable.app.ui.screens
 
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.journeyapps.barcodescanner.ScanContract
@@ -69,28 +71,35 @@ import com.sublemonable.app.ui.theme.VerifiedGreen
 @Composable
 fun AddContactScreen(
     myContactPayload: String?,
+    myAccountId: String?,
     onBack: () -> Unit,
     onAdd: (contactId: String, displayName: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    // Camera is optional (manifest uses-feature required=false); only offer the
+    // scanner when the device actually has one.
+    val hasCamera = remember {
+        context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)
+    }
     var contactInput by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("") }
     var parseError by remember { mutableStateOf(false) }
+    var selfError by remember { mutableStateOf(false) }
     var scanned by remember { mutableStateOf(false) }
+
+    fun isSelf(id: String) = myAccountId != null && id.equals(myAccountId, ignoreCase = true)
 
     // ZXing owns the camera + runtime permission flow; results come back here as
     // untrusted text and only ever pass through parseContactInput.
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         val raw = result.contents ?: return@rememberLauncherForActivityResult
         val parsed = parseContactInput(raw)
-        if (parsed != null) {
-            contactInput = parsed
-            parseError = false
-            scanned = true
-        } else {
-            parseError = true
-            scanned = false
+        when {
+            parsed == null -> { parseError = true; selfError = false; scanned = false }
+            isSelf(parsed) -> { selfError = true; parseError = false; scanned = false }
+            else -> { contactInput = parsed; parseError = false; selfError = false; scanned = true }
         }
     }
 
@@ -162,33 +171,35 @@ fun AddContactScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Button(
-                onClick = {
-                    scanLauncher.launch(
-                        ScanOptions()
-                            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                            .setBeepEnabled(false)
-                            .setOrientationLocked(false)
-                            .setPrompt("Point at a Sublemonable contact QR")
-                            .setCaptureActivity(SecureCaptureActivity::class.java),
+            if (hasCamera) {
+                Button(
+                    onClick = {
+                        scanLauncher.launch(
+                            ScanOptions()
+                                .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                .setBeepEnabled(false)
+                                .setOrientationLocked(false)
+                                .setPrompt("Point at a Sublemonable contact QR")
+                                .setCaptureActivity(SecureCaptureActivity::class.java),
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Lemon,
+                        contentColor = TextOnLemon,
+                    ),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.QrCodeScanner,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 8.dp),
                     )
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Lemon,
-                    contentColor = TextOnLemon,
-                ),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.QrCodeScanner,
-                    contentDescription = null,
-                    modifier = Modifier.padding(end = 8.dp),
-                )
-                Text("Scan their code")
+                    Text("Scan their code")
+                }
             }
 
             Text(
-                text = "or paste their code / invite link",
+                text = if (hasCamera) "or paste their code / invite link" else "Paste their code / invite link",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextMuted,
             )
@@ -200,6 +211,7 @@ fun AddContactScreen(
                     // parseContactInput trims at parse time anyway.
                     contactInput = it
                     parseError = false
+                    selfError = false
                     scanned = false
                 },
                 placeholder = "Contact ID, invite link, or QR payload",
@@ -220,6 +232,13 @@ fun AddContactScreen(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
+            if (selfError) {
+                Text(
+                    text = "That's your own code — add someone else.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             ContactField(
                 value = displayName,
                 onValueChange = { displayName = it },
@@ -230,10 +249,10 @@ fun AddContactScreen(
             Button(
                 onClick = {
                     val parsed = parseContactInput(contactInput)
-                    if (parsed == null) {
-                        parseError = true
-                    } else {
-                        onAdd(parsed, displayName.ifBlank { "Unnamed contact" })
+                    when {
+                        parsed == null -> parseError = true
+                        isSelf(parsed) -> selfError = true
+                        else -> onAdd(parsed, displayName.ifBlank { "Unnamed contact" })
                     }
                 },
                 enabled = contactInput.isNotBlank(),

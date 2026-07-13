@@ -81,10 +81,13 @@ class WsClient(
     // intentional-close guard depend on cross-thread visibility.
     @Volatile
     private var webSocket: WebSocket? = null
+    @Volatile
     private var reconnectJob: Job? = null
+    @Volatile
     private var reconnectAttempts = 0
     @Volatile
     private var intentionallyClosed = false
+    @Volatile
     private var currentToken: String? = null
 
     fun updateClient(newClient: OkHttpClient) {
