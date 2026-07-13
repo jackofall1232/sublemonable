@@ -46,7 +46,7 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.sublemonable.app.ui.components.QrCode
 import com.sublemonable.app.ui.components.SecureCaptureActivity
-import com.sublemonable.app.ui.components.parseContactInput
+import com.sublemonable.app.ui.components.parseContactPayload
 import com.sublemonable.app.ui.theme.BackgroundElevated
 import com.sublemonable.app.ui.theme.BackgroundPrimary
 import com.sublemonable.app.ui.theme.BorderColor
@@ -73,7 +73,7 @@ fun AddContactScreen(
     myContactPayload: String?,
     myAccountId: String?,
     onBack: () -> Unit,
-    onAdd: (contactId: String, displayName: String) -> Unit,
+    onAdd: (contactId: String, identityKeyBase64: String?, displayName: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -88,18 +88,28 @@ fun AddContactScreen(
     var parseError by remember { mutableStateOf(false) }
     var selfError by remember { mutableStateOf(false) }
     var scanned by remember { mutableStateOf(false) }
+    // Identity key recovered from a scanned payload — the field only shows the
+    // UUID, so this preserves the out-of-band key to pin at add time. Cleared
+    // whenever the user edits the field by hand.
+    var scannedIdentityKey by remember { mutableStateOf<String?>(null) }
 
     fun isSelf(id: String) = myAccountId != null && id.equals(myAccountId, ignoreCase = true)
 
     // ZXing owns the camera + runtime permission flow; results come back here as
-    // untrusted text and only ever pass through parseContactInput.
+    // untrusted text and only ever pass through parseContactPayload.
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         val raw = result.contents ?: return@rememberLauncherForActivityResult
-        val parsed = parseContactInput(raw)
+        val parsed = parseContactPayload(raw)
         when {
             parsed == null -> { parseError = true; selfError = false; scanned = false }
-            isSelf(parsed) -> { selfError = true; parseError = false; scanned = false }
-            else -> { contactInput = parsed; parseError = false; selfError = false; scanned = true }
+            isSelf(parsed.accountId) -> { selfError = true; parseError = false; scanned = false }
+            else -> {
+                contactInput = parsed.accountId
+                scannedIdentityKey = parsed.identityKeyBase64
+                parseError = false
+                selfError = false
+                scanned = true
+            }
         }
     }
 
@@ -208,8 +218,10 @@ fun AddContactScreen(
                 value = contactInput,
                 onValueChange = {
                     // Store raw text — trimming here can jump the cursor;
-                    // parseContactInput trims at parse time anyway.
+                    // the parser trims at parse time anyway. Typing invalidates
+                    // any key captured from a prior scan.
                     contactInput = it
+                    scannedIdentityKey = null
                     parseError = false
                     selfError = false
                     scanned = false
@@ -248,11 +260,17 @@ fun AddContactScreen(
 
             Button(
                 onClick = {
-                    val parsed = parseContactInput(contactInput)
+                    val parsed = parseContactPayload(contactInput)
                     when {
                         parsed == null -> parseError = true
-                        isSelf(parsed) -> selfError = true
-                        else -> onAdd(parsed, displayName.ifBlank { "Unnamed contact" })
+                        isSelf(parsed.accountId) -> selfError = true
+                        else -> onAdd(
+                            parsed.accountId,
+                            // Full-JSON paste carries the key directly; a scanned
+                            // UUID keeps it in scannedIdentityKey.
+                            parsed.identityKeyBase64 ?: scannedIdentityKey,
+                            displayName.ifBlank { "Unnamed contact" },
+                        )
                     }
                 },
                 enabled = contactInput.isNotBlank(),

@@ -347,7 +347,7 @@ private fun SublemonableRoot(
                     myContactPayload = myPayload,
                     myAccountId = accountId,
                     onBack = { route = Route.ChatList },
-                    onAdd = { contactId, displayName ->
+                    onAdd = { contactId, identityKeyBase64, displayName ->
                         // Never establish a Double Ratchet session with our own
                         // identity — libsignal treats that as undefined and it
                         // can corrupt the session store. AddContactScreen already
@@ -357,6 +357,11 @@ private fun SublemonableRoot(
                                 id = contactId,
                                 contactId = contactId,
                                 displayName = displayName,
+                                // Seed the known key so Verify shows the right
+                                // safety number before the first message, and
+                                // pin it so a substituted relay bundle is caught.
+                                contactIdentityKeyBase64 = identityKeyBase64,
+                                pinnedIdentityKeyBase64 = identityKeyBase64,
                                 lastActivityMs = System.currentTimeMillis(),
                             )
                             container.conversationRepository.upsert(conversation)

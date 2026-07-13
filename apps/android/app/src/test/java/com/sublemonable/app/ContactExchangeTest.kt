@@ -7,8 +7,10 @@ package com.sublemonable.app
 
 import com.sublemonable.app.ui.components.buildContactExchangePayload
 import com.sublemonable.app.ui.components.parseContactInput
+import com.sublemonable.app.ui.components.parseContactPayload
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ContactExchangeTest {
@@ -37,5 +39,29 @@ class ContactExchangeTest {
         // the same account id — this is the contract with iOS/web.
         val payload = buildContactExchangePayload(uuid, identityKey)
         assertEquals(uuid, parseContactInput(payload))
+    }
+
+    @Test
+    fun `full payload carries the identity key to pin`() {
+        val payload = buildContactExchangePayload(uuid, identityKey)
+        val parsed = parseContactPayload(payload)!!
+        assertEquals(uuid, parsed.accountId)
+        assertEquals(identityKey, parsed.identityKeyBase64)
+    }
+
+    @Test
+    fun `bare uuid and link have no key to pin`() {
+        assertEquals(uuid, parseContactPayload(uuid)!!.accountId)
+        assertNull(parseContactPayload(uuid)!!.identityKeyBase64)
+        val fromLink = parseContactPayload("https://sublemonable.example/add/$uuid")!!
+        assertEquals(uuid, fromLink.accountId)
+        assertNull(fromLink.identityKeyBase64)
+    }
+
+    @Test
+    fun `payload without an identity key yields a null pin`() {
+        val parsed = parseContactPayload("""{"version":"1","account_id":"$uuid"}""")!!
+        assertEquals(uuid, parsed.accountId)
+        assertNull(parsed.identityKeyBase64)
     }
 }

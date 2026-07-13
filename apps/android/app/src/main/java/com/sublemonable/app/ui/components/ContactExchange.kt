@@ -40,27 +40,44 @@ fun buildContactExchangePayload(accountId: String, identityKeyBase64: String): S
     }.toString()
 
 /**
- * Extracts the contact's account UUID from whatever was shared:
+ * A parsed contact: the routing UUID and, when the shared blob was a full
+ * ContactExchangePayload, the out-of-band identity key to pin. [identityKeyBase64]
+ * is null for bare-UUID / link inputs (nothing to pin — trust-on-first-use).
+ */
+data class ParsedContact(val accountId: String, val identityKeyBase64: String?)
+
+/**
+ * Parses whatever was scanned/pasted into a [ParsedContact]:
  * - the JSON ContactExchangePayload other clients put in QR codes
- *   ({"version":"1","account_id":"<uuid>","identity_key":"<base64>"}),
- * - an invite link or any text containing a UUID,
- * - or the raw UUID itself.
+ *   ({"version":"1","account_id":"<uuid>","identity_key":"<base64>"}) — carries
+ *   BOTH fields, so the identity key can be pinned,
+ * - an invite link or any text containing a UUID — UUID only,
+ * - or the raw UUID itself — UUID only.
  * Returns null when no UUID can be found. Pure — covered by unit tests. Scanner
  * output and pasted text are untrusted input; they only ever reach the app
  * through here, and this fails closed on anything that isn't a UUID.
  */
-fun parseContactInput(input: String): String? {
+fun parseContactPayload(input: String): ParsedContact? {
     val trimmed = input.trim()
     if (trimmed.startsWith("{")) {
         try {
-            val accountId = JSONObject(trimmed).optString("account_id")
-            if (UUID_REGEX.matches(accountId)) return accountId.lowercase()
+            val obj = JSONObject(trimmed)
+            val accountId = obj.optString("account_id")
+            if (UUID_REGEX.matches(accountId)) {
+                val key = obj.optString("identity_key").ifBlank { null }
+                return ParsedContact(accountId.lowercase(), key)
+            }
         } catch (_: JSONException) {
             // Fall through to the generic UUID search.
         }
     }
-    return UUID_REGEX.find(trimmed)?.value?.lowercase()
+    // Non-JSON (link / raw UUID): only the UUID is recoverable, no key to pin.
+    val id = UUID_REGEX.find(trimmed)?.value?.lowercase() ?: return null
+    return ParsedContact(id, null)
 }
+
+/** UUID-only convenience over [parseContactPayload]. Covered by unit tests. */
+fun parseContactInput(input: String): String? = parseContactPayload(input)?.accountId
 
 private val UUID_REGEX = Regex(
     "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",

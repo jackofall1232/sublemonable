@@ -41,6 +41,14 @@ data class Conversation(
     val displayName: String,
     /** Base64 identity key of the contact, for safety-number verification. */
     val contactIdentityKeyBase64: String? = null,
+    /**
+     * Base64 identity key exchanged OUT OF BAND (scanned/pasted contact QR).
+     * When present it is pinned: if the relay's prekey bundle later returns a
+     * different identity key, that is a key-substitution attempt — the session
+     * is refused and [keyChanged] is raised. Null for contacts added by bare
+     * UUID/link (no key to pin — trust-on-first-use).
+     */
+    val pinnedIdentityKeyBase64: String? = null,
     val verified: Boolean = false,
     val keyChanged: Boolean = false,
     val unreadCount: Int = 0,

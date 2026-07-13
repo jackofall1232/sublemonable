@@ -191,6 +191,16 @@ class MessagingCoordinator(
             runCatching {
                 if (!signal.hasSession(conversation.contactId)) {
                     val bundle = api.fetchPreKeyBundle(conversation.contactId)
+                    val pinned = conversation.pinnedIdentityKeyBase64
+                    if (pinned != null && pinned != bundle.identityKeyBase64) {
+                        // The relay returned a different identity key than the
+                        // one exchanged out of band (contact QR). That is a
+                        // key-substitution attempt — refuse to establish the
+                        // session or send, and raise the warning badge instead
+                        // of silently trusting the relay's key.
+                        conversations.flagIdentityMismatch(conversation.contactId)
+                        return@launch
+                    }
                     signal.establishSession(conversation.contactId, bundle)
                     conversations.upsert(
                         conversation.copy(contactIdentityKeyBase64 = bundle.identityKeyBase64),
