@@ -796,3 +796,30 @@ Multi-track session (Phase 0/1 sequential, then Tracks A–D). Nothing committed
   camera scanner inside MainActivity (FLAG_SECURE + camera interplay; use the separate
   SecureCaptureActivity).
 - **Lock:** none (no protected-path write; no `lock.json` in this repo's `.l00prite/`).
+
+#### Addendum — PR #14 review round + CI hardening
+- **PR opened:** jackofall1232/sublemonable#14. Bots reviewed: gemini-code-assist, Copilot,
+  Vercel (website preview — Ready, no action).
+- **Discovery (important):** the CI `android` job was a **stub** — it only ran `test -f` on two
+  Gradle files, no SDK, no build, no tests. So nothing in the pipeline actually compiled or
+  tested the Android app; my earlier "CI is the real gate" was wrong. With user sign-off,
+  replaced it with a real job: `android-actions/setup-android@v3` + `sdkmanager` platform/
+  build-tools + `./gradlew :app:assembleDebug :app:testDebugUnitTest`. This is now the genuine
+  build/test gate for this PR and all future ones.
+- **Review findings addressed (7, all valid, all fixed):**
+  - [Gemini HIGH] adding yourself as a contact → establishing a Double Ratchet session with your
+    own identity key can corrupt the session store: guarded in `AddContactScreen` (visible
+    "that's your own code" error) + a defensive backstop in `MainActivity.onAdd`.
+  - [Gemini HIGH] `@Volatile` on cross-thread `MessagingCoordinator.onForcedLogout`/`linkJob`.
+  - [Gemini HIGH]/[Copilot HIGH] `@Volatile` on `WsClient.reconnectJob`/`reconnectAttempts`
+    (also added to `currentToken`; `webSocket`/`intentionallyClosed` were already done).
+  - [Gemini MEDIUM] identity-fingerprint keystore/crypto moved off the main thread
+    (`LaunchedEffect` + `withContext(Dispatchers.Default)`), collected as state.
+  - [Gemini MEDIUM] contact-exchange payload build (keystore + signing) moved off the main
+    thread the same way.
+  - [Copilot MEDIUM] camera is optional (`uses-feature required=false`) but the scan button was
+    always shown — now hidden on camera-less devices (`FEATURE_CAMERA_ANY`); paste still works.
+  - [Copilot MEDIUM] boot-supervisor backoff off-by-one (first retry waited 2s not 1s) — now
+    computes the delay from the current attempt before incrementing, matching WsClient.
+- **Still unbuilt in my session** (no SDK) — the new CI job is now the first real build; watching
+  it via the PR subscription.
