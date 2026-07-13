@@ -2,6 +2,14 @@
 
 ## Next
 
+- [ ] **CI-verify the Android UI-wiring branch (`claude/l00prite-android-ui-wiring-58wvq6`).**
+      That session had no Android SDK, so nothing was built. Before merge, run the Android CI
+      job: Gradle assemble + `:app:testDebugUnitTest` (incl. new `ContactExchangeTest`), and
+      confirm `zxing-android-embedded:4.3.0` resolves + manifest-merges cleanly. Then on-device
+      smoke-test: first-run registration populates Account ID; Connection auto-retries and shows
+      the right transport line (Tor vs clearnet-warning); QR display/scan/copy add a contact;
+      "Get Orbot" opens a store and the toggle un-disables on return. FLAG_SECURE camera preview
+      renders (not black) under `Theme.Material.NoActionBar`.
 - [ ] **Release keystore off-box pull (pending user).** `~/onion-key-backup/sublemonable-release.jks`
       + `…-info.txt` are staged; scp them off-box and confirm. Not a real backup until pulled.
       Same for `~/onion-key-backup/sublemonable-relay.dat` (I2P dest key) and the three Tor
@@ -58,9 +66,15 @@ they need real infrastructure access, signing keys, and a human decision point:
       only.
 - [ ] Native v1.5 Settings UI (connection-mode selector, privacy-view rendering, dead-drop QR,
       second-passphrase setup) on iOS/Android — the v1.5 data models exist but have no native UI
-      consumer yet.
+      consumer yet. (Partial on Android: the connection status line now reflects the active
+      transport, and contact-exchange QR/scan/copy shipped this session — but the
+      connection-mode selector, privacy-view, dead-drop QR, and second-passphrase UI are still
+      unbuilt.)
 - [ ] Background decoy tasks (iOS `BGProcessingTask`, Android `WorkManager`, web Service Worker).
-- [ ] QR generation/scanning for dead-drop token exchange (currently copy/paste token only).
+- [ ] QR generation/scanning for **dead-drop token** exchange (Ghost-mode messaging capability —
+      still copy/paste token only). NOTE: this is distinct from **contact-exchange** QR
+      (ContactExchangePayload), which now exists on Android (My-QR + scanner + copy-code, this
+      session). Do not conflate the two.
 - [ ] **In-process I2P on mobile** (iOS/Android) — no production I2P router SDK exists for
       in-process embedding; requires same class of SDK work as Guardian Project's `Tor.framework`/
       `tor-android`. `detectI2P()` is an honest stub on mobile; the chain falls correctly to Tor.

@@ -63,6 +63,22 @@ code — not speculative.
   not-yet-done work (see `docs/V1_5_STATUS.md`), not something to infer as already shipped.
 - `docker-compose.tor.yml` is an overlay on top of `docker-compose.yml` — the Tor hidden services
   are optional, not required to run the server.
+- **Contact-add uses `ContactExchangePayload`, NOT the dead-drop token.** Adding a contact by
+  QR/link across every client is the JSON `{"version":"1","account_id":"<uuid>",
+  "identity_key":"<base64>"}` — iOS `ConversationStore.ContactExchangePayload` +
+  `SignalManager.contactExchangePayload()`, the web/Android parsers, and Android's
+  `ui/components/ContactExchange.kt` (`buildContactExchangePayload`/`parseContactInput`, pinned
+  by `ContactInputParserTest`/`ContactExchangeTest`). The **dead-drop token** (256-bit,
+  `packages/crypto/deaddrop.ts`) is a separate single-use anonymous *messaging* capability for
+  Ghost mode — it carries no durable identity and must never be used for contact discovery.
+- **Android relay transport is Orbot-opt-in Tor or clearnet — no in-process I2P/Tor.** The fixed
+  I2P→Tor→clearnet hierarchy is the protocol posture, but on mobile I2P is an honest stub and
+  Tor is Orbot-only, so Android's real universe is clearnet (default) or Tor-over-Orbot-SOCKS
+  when the (pre-existing, pre-v1.5) toggle is on. As of the 2026-07 UI-wiring pass the Android
+  boot is a single-flight, backoff-retrying supervisor in `MessagingCoordinator.start()`
+  (registration + session + socket come up automatically, `onAuthExpired` re-sessions on a dead
+  JWT), and `SettingsScreen` surfaces the active transport with clearnet always flagged. Do not
+  reintroduce the old one-shot blanket-`runCatching` boot with no retry.
 - Watermarking (web screenshot leak attribution) embeds **both** conversation parties' account
   UUIDs per conversation view — a deliberate, documented tradeoff against the project's own
   metadata-minimization goals (`docs/SECURITY_MODEL.md` §"Watermark tradeoff").
