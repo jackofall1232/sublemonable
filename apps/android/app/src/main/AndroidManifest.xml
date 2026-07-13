@@ -9,10 +9,16 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!-- The ONLY permissions this app requests. No contacts, no storage,
-         no location, no camera (QR display only — scanning is out of v1 scope). -->
+         no location. CAMERA is used solely to scan a contact's QR code (their
+         public routing ID + key); the app never records or stores images. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- A camera is optional — devices without one still install and work
+         (QR scanning is simply unavailable); paste/link add still functions. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <!-- Required on Android 11+ to detect whether Orbot (Tor) is installed. -->
     <queries>
@@ -49,5 +55,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- QR scanner for contact exchange. Subclasses ZXing's CaptureActivity
+             only to apply FLAG_SECURE (see SecureCaptureActivity). Not exported —
+             launched in-process, never by another app. -->
+        <activity
+            android:name=".ui.components.SecureCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="fullSensor"
+            android:stateNotNeeded="true"
+            android:theme="@style/Theme.Sublemonable" />
     </application>
 </manifest>

@@ -79,6 +79,17 @@ class ConversationRepository(
         }
     }
 
+    /**
+     * The relay returned an identity key that doesn't match the out-of-band key
+     * pinned when this contact was added. Raise the warning and drop verified,
+     * but KEEP the pinned key (do not adopt the relay's substitute).
+     */
+    fun flagIdentityMismatch(contactId: String) {
+        findByContact(contactId)?.let {
+            upsert(it.copy(keyChanged = true, verified = false))
+        }
+    }
+
     fun remove(conversationId: String) {
         _conversations.value = _conversations.value.filterNot { it.id == conversationId }
     }

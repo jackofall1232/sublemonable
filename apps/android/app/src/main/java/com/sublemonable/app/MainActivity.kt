@@ -29,11 +29,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.fragment.app.FragmentActivity
 import com.sublemonable.app.data.Conversation
 import com.sublemonable.app.security.RootDetection
 import com.sublemonable.app.tor.TorIntegration
-import com.sublemonable.app.ui.components.NewChatDialog
+import com.sublemonable.app.ui.components.buildContactExchangePayload
+import com.sublemonable.app.ui.screens.AddContactScreen
 import com.sublemonable.app.ui.screens.ChatListScreen
 import com.sublemonable.app.ui.screens.ChatScreen
 import com.sublemonable.app.ui.screens.KeyVerificationScreen
@@ -43,6 +45,8 @@ import com.sublemonable.app.ui.screens.SettingsScreen
 import com.sublemonable.app.ui.screens.SplashScreen
 import com.sublemonable.app.ui.theme.Motion
 import com.sublemonable.app.ui.theme.SublemonableTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The single Activity. Extends FragmentActivity because BiometricPrompt
@@ -147,6 +151,7 @@ private sealed interface Route {
     data object ChatList : Route
     data class Chat(val conversationId: String) : Route
     data object Settings : Route
+    data object AddContact : Route
     data class Verify(val conversationId: String) : Route
 }
 
@@ -161,12 +166,12 @@ private fun SublemonableRoot(
     val conversations by container.conversationRepository.conversations.collectAsState()
     val allMessages by container.messageRepository.messages.collectAsState()
     val typingPeers by container.coordinator.typingPeers.collectAsState()
-    val connectionState by container.wsClient.connectionState.collectAsState()
+    val connectivity by container.coordinator.connectivity.collectAsState()
+    val accountId by container.apiClient.accountIdFlow.collectAsState()
 
     var route by remember { mutableStateOf<Route>(Route.Splash) }
     var unlocked by remember { mutableStateOf(false) }
     var lockError by remember { mutableStateOf<String?>(null) }
-    var showNewChatDialog by remember { mutableStateOf(false) }
 
     // Root detection: warn once per process, never block.
     var rootWarningVisible by remember {
@@ -248,7 +253,7 @@ private fun SublemonableRoot(
                 onDismissRootWarning = { rootWarningVisible = false },
                 onOpenConversation = { route = Route.Chat(it.id) },
                 onOpenSettings = { route = Route.Settings },
-                onNewChat = { showNewChatDialog = true },
+                onNewChat = { route = Route.AddContact },
             )
 
             is Route.Chat -> {
@@ -281,26 +286,90 @@ private fun SublemonableRoot(
                 }
             }
 
-            Route.Settings -> SettingsScreen(
-                settingsRepository = container.settingsRepository,
-                accountId = container.apiClient.accountId,
-                identityFingerprint = remember {
-                    runCatching {
-                        container.signalManager.ensureIdentity()
-                        container.signalManager.localFingerprint()
-                    }.getOrDefault("")
-                },
-                connectionState = connectionState,
-                torAvailable = remember { TorIntegration.isOrbotInstalled(context) },
-                onBack = { route = Route.ChatList },
-                onDeleteAccount = {
-                    container.coordinator.deleteAccountAndWipe {
-                        container.signalStore.wipe()
-                        unlocked = false
-                        route = Route.Splash
+            Route.Settings -> {
+                // Re-check Orbot on every resume: the user may install it via
+                // the "Get Orbot" action and return to this still-live screen.
+                var torAvailable by remember {
+                    mutableStateOf(TorIntegration.isOrbotInstalled(context))
+                }
+                LifecycleResumeEffect(Unit) {
+                    torAvailable = TorIntegration.isOrbotInstalled(context)
+                    onPauseOrDispose { }
+                }
+                // Keystore + fingerprint work is off the main thread — doing it
+                // in composition can drop frames / ANR.
+                var identityFingerprint by remember { mutableStateOf("") }
+                LaunchedEffect(Unit) {
+                    identityFingerprint = withContext(Dispatchers.Default) {
+                        runCatching {
+                            container.signalManager.ensureIdentity()
+                            container.signalManager.localFingerprint()
+                        }.getOrDefault("")
                     }
-                },
-            )
+                }
+                SettingsScreen(
+                    settingsRepository = container.settingsRepository,
+                    accountId = accountId,
+                    identityFingerprint = identityFingerprint,
+                    connectivity = connectivity,
+                    torAvailable = torAvailable,
+                    onBack = { route = Route.ChatList },
+                    onDeleteAccount = {
+                        container.coordinator.deleteAccountAndWipe {
+                            container.signalStore.wipe()
+                            unlocked = false
+                            route = Route.Splash
+                        }
+                    },
+                )
+            }
+
+            Route.AddContact -> {
+                // Build our own shareable code from the registered identity.
+                // Null until first-run registration lands; keyed on the
+                // observable accountId so it appears the instant register()
+                // completes. Off the main thread — it does keystore + signing.
+                var myPayload by remember(accountId) { mutableStateOf<String?>(null) }
+                LaunchedEffect(accountId) {
+                    myPayload = withContext(Dispatchers.Default) {
+                        accountId?.let { acct ->
+                            runCatching {
+                                container.signalManager.ensureIdentity()
+                                buildContactExchangePayload(
+                                    accountId = acct,
+                                    identityKeyBase64 = container.signalManager.localIdentityPublicKeyBase64(),
+                                )
+                            }.getOrNull()
+                        }
+                    }
+                }
+                AddContactScreen(
+                    myContactPayload = myPayload,
+                    myAccountId = accountId,
+                    onBack = { route = Route.ChatList },
+                    onAdd = { contactId, identityKeyBase64, displayName ->
+                        // Never establish a Double Ratchet session with our own
+                        // identity — libsignal treats that as undefined and it
+                        // can corrupt the session store. AddContactScreen already
+                        // blocks it in the UI; this is the defensive backstop.
+                        if (!contactId.equals(accountId, ignoreCase = true)) {
+                            val conversation = Conversation(
+                                id = contactId,
+                                contactId = contactId,
+                                displayName = displayName,
+                                // Seed the known key so Verify shows the right
+                                // safety number before the first message, and
+                                // pin it so a substituted relay bundle is caught.
+                                contactIdentityKeyBase64 = identityKeyBase64,
+                                pinnedIdentityKeyBase64 = identityKeyBase64,
+                                lastActivityMs = System.currentTimeMillis(),
+                            )
+                            container.conversationRepository.upsert(conversation)
+                            route = Route.Chat(conversation.id)
+                        }
+                    },
+                )
+            }
 
             is Route.Verify -> {
                 val conversation = conversations.firstOrNull { it.id == current.conversationId }
@@ -331,22 +400,5 @@ private fun SublemonableRoot(
                 }
             }
         }
-    }
-
-    if (showNewChatDialog) {
-        NewChatDialog(
-            onDismiss = { showNewChatDialog = false },
-            onAdd = { contactId, displayName ->
-                showNewChatDialog = false
-                val conversation = Conversation(
-                    id = contactId,
-                    contactId = contactId,
-                    displayName = displayName,
-                    lastActivityMs = System.currentTimeMillis(),
-                )
-                container.conversationRepository.upsert(conversation)
-                route = Route.Chat(conversation.id)
-            },
-        )
     }
 }

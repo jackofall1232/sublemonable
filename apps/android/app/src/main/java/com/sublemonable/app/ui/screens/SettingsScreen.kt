@@ -5,6 +5,8 @@
 
 package com.sublemonable.app.ui.screens
 
+import android.content.ActivityNotFoundException
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -27,15 +29,19 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.sublemonable.app.MessagingCoordinator
 import com.sublemonable.app.data.SettingsRepository
-import com.sublemonable.app.net.WsClient
+import com.sublemonable.app.data.TransportState
+import com.sublemonable.app.tor.TorIntegration
 import com.sublemonable.app.ui.components.KeyFingerprintDisplay
 import com.sublemonable.app.ui.components.LemonSliceSecurity
 import com.sublemonable.app.ui.components.ttlLabel
 import com.sublemonable.app.ui.theme.BackgroundElevated
 import com.sublemonable.app.ui.theme.BackgroundPrimary
 import com.sublemonable.app.ui.theme.BorderColor
+import com.sublemonable.app.ui.theme.BurnOrange
 import com.sublemonable.app.ui.theme.ErrorRed
 import com.sublemonable.app.ui.theme.Lemon
 import com.sublemonable.app.ui.theme.MonoFamily
@@ -56,13 +62,25 @@ fun SettingsScreen(
     settingsRepository: SettingsRepository,
     accountId: String?,
     identityFingerprint: String,
-    connectionState: WsClient.ConnectionState,
+    connectivity: MessagingCoordinator.Connectivity,
     torAvailable: Boolean,
     onBack: () -> Unit,
     onDeleteAccount: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val settings by settingsRepository.settings.collectAsState()
+    val context = LocalContext.current
+
+    // Live transport, derived only from facts we actually hold. I2P is never
+    // emitted on mobile (no in-process router SDK — see ConnectionMode.kt); the
+    // real universe here is Tor-over-Orbot or clearnet. Clearnet is always
+    // flagged per the locked I2P -> Tor -> clearnet hierarchy.
+    val transport = when (connectivity) {
+        MessagingCoordinator.Connectivity.ONLINE ->
+            if (settings.torEnabled && torAvailable) TransportState.TOR else TransportState.CLEARNET_FALLBACK
+        MessagingCoordinator.Connectivity.CONNECTING -> null
+        MessagingCoordinator.Connectivity.OFFLINE -> TransportState.OFFLINE
+    }
 
     Column(
         modifier = modifier
@@ -149,8 +167,13 @@ fun SettingsScreen(
         SectionHeader("Account")
         ClickableRow(
             title = "Account ID",
-            subtitle = accountId ?: "Not registered yet",
-            subtitleMono = true,
+            // Registration happens automatically at first launch. If it hasn't
+            // landed yet, say why instead of a dead-end "Not registered yet".
+            subtitle = accountId ?: when (connectivity) {
+                MessagingCoordinator.Connectivity.CONNECTING -> "Setting up your encrypted identity…"
+                else -> "Not registered yet — waiting for a connection to the relay"
+            },
+            subtitleMono = accountId != null,
             onClick = {},
         )
         ClickableRow(
@@ -173,6 +196,23 @@ fun SettingsScreen(
             enabled = torAvailable,
             onToggle = settingsRepository::setTorEnabled,
         )
+        // When Orbot is missing, give an actual way to get it (Issue: the
+        // toggle said "install it first" but offered no path). Play Store first,
+        // F-Droid as an explicit second option — our audience skews F-Droid.
+        if (!torAvailable) {
+            ClickableRow(
+                title = "Get Orbot",
+                subtitle = "Install the Tor proxy app, then come back and enable Tor.",
+                titleColor = Lemon,
+                onClick = { openOrbotInstall(context) },
+            )
+            ClickableRow(
+                title = "…or get Orbot on F-Droid",
+                subtitle = TorIntegration.ORBOT_FDROID_URL,
+                subtitleMono = true,
+                onClick = { context.startActivitySafely(TorIntegration.orbotFDroidIntent()) },
+            )
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -186,26 +226,40 @@ fun SettingsScreen(
                     color = TextPrimary,
                 )
                 Text(
-                    text = when (connectionState) {
-                        WsClient.ConnectionState.CONNECTED -> "Connected — end-to-end encrypted"
-                        WsClient.ConnectionState.CONNECTING -> "Connecting…"
-                        WsClient.ConnectionState.DISCONNECTED -> "Offline"
+                    text = when (transport) {
+                        TransportState.I2P -> "Connected via I2P — end-to-end encrypted"
+                        TransportState.TOR -> "Connected via Tor — end-to-end encrypted"
+                        TransportState.CLEARNET_FALLBACK -> "Connected over clearnet"
+                        TransportState.OFFLINE -> "Offline"
+                        null -> "Connecting…"
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = when (connectionState) {
-                        WsClient.ConnectionState.CONNECTED -> VerifiedGreen
-                        WsClient.ConnectionState.CONNECTING -> Lemon
-                        WsClient.ConnectionState.DISCONNECTED -> TextMuted
+                    color = when (transport) {
+                        TransportState.I2P, TransportState.TOR -> VerifiedGreen
+                        TransportState.CLEARNET_FALLBACK -> BurnOrange
+                        TransportState.OFFLINE -> TextMuted
+                        null -> Lemon
                     },
                 )
+                // Clearnet is always warned (docs/…/transport.ts CLEARNET_WARNING):
+                // still E2E-encrypted, but the IP address may be visible.
+                if (transport == TransportState.CLEARNET_FALLBACK) {
+                    Text(
+                        text = "Still end-to-end encrypted, but your IP may be visible. " +
+                            "Enable Tor above for full anonymity.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextMuted,
+                    )
+                }
             }
             LemonSliceSecurity(
-                level = when (connectionState) {
-                    WsClient.ConnectionState.CONNECTED -> 8
-                    WsClient.ConnectionState.CONNECTING -> 4
-                    WsClient.ConnectionState.DISCONNECTED -> 0
+                level = when (transport) {
+                    TransportState.I2P, TransportState.TOR -> 8
+                    TransportState.CLEARNET_FALLBACK -> 6
+                    TransportState.OFFLINE -> 0
+                    null -> 4
                 },
-                verified = connectionState == WsClient.ConnectionState.CONNECTED,
+                verified = transport == TransportState.TOR || transport == TransportState.I2P,
             )
         }
 
@@ -308,4 +362,23 @@ private fun ClickableRow(
         }
         trailing?.invoke()
     }
+}
+
+/**
+ * Opens Orbot's install page. Tries the Play Store first; on a device with no
+ * store app (e.g. de-Googled), falls back to the F-Droid listing in a browser.
+ * Never throws — a missing handler is a no-op, not a crash.
+ */
+private fun openOrbotInstall(context: Context) {
+    if (!context.startActivitySafely(TorIntegration.orbotInstallIntent())) {
+        context.startActivitySafely(TorIntegration.orbotFDroidIntent())
+    }
+}
+
+/** startActivity guarded against ActivityNotFoundException. Returns success. */
+private fun Context.startActivitySafely(intent: android.content.Intent): Boolean = try {
+    startActivity(intent)
+    true
+} catch (e: ActivityNotFoundException) {
+    false
 }

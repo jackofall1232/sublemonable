@@ -1,0 +1,84 @@
+// Sublemonable — Copyright (C) 2026 Sublemonable contributors
+// Licensed under the GNU Affero General Public License v3.0 or later.
+// See the LICENSE file in the repository root for full license text.
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package com.sublemonable.app.ui.components
+
+import org.json.JSONException
+import org.json.JSONObject
+
+/**
+ * Contact-exchange (QR / link) payload — the shared, cross-client format used to
+ * add a contact by their routing ID and identity public key.
+ *
+ * This is deliberately the ContactExchangePayload format, NOT a dead-drop token.
+ * The dead-drop token (packages/crypto/deaddrop.ts) is a single-use anonymous
+ * *messaging* capability for Ghost mode; it carries no durable identity and no
+ * client parses it as a contact-add input. Using it here would invent a contact
+ * protocol nothing can read. The identity/routing exchange has always been
+ * ContactExchangePayload: iOS ConversationStore.ContactExchangePayload +
+ * SignalManager.contactExchangePayload(), and parseContactInput below.
+ */
+
+/** Wire version string for the payload — a string "1", matching iOS. */
+const val CONTACT_EXCHANGE_VERSION = "1"
+
+/**
+ * Builds this account's shareable contact payload:
+ * `{"version":"1","account_id":"<uuid>","identity_key":"<base64>"}` — identical
+ * in shape and field order to iOS SignalManager.contactExchangePayload(). The
+ * `identityKeyBase64` must be the same bytes registered with the relay
+ * (SignalProtocolManager.localIdentityPublicKeyBase64()) so a scanning peer can
+ * verify the fingerprint before the first message. Pure — covered by tests.
+ */
+fun buildContactExchangePayload(accountId: String, identityKeyBase64: String): String =
+    JSONObject().apply {
+        put("version", CONTACT_EXCHANGE_VERSION)
+        put("account_id", accountId.lowercase())
+        put("identity_key", identityKeyBase64)
+    }.toString()
+
+/**
+ * A parsed contact: the routing UUID and, when the shared blob was a full
+ * ContactExchangePayload, the out-of-band identity key to pin. [identityKeyBase64]
+ * is null for bare-UUID / link inputs (nothing to pin — trust-on-first-use).
+ */
+data class ParsedContact(val accountId: String, val identityKeyBase64: String?)
+
+/**
+ * Parses whatever was scanned/pasted into a [ParsedContact]:
+ * - the JSON ContactExchangePayload other clients put in QR codes
+ *   ({"version":"1","account_id":"<uuid>","identity_key":"<base64>"}) — carries
+ *   BOTH fields, so the identity key can be pinned,
+ * - an invite link or any text containing a UUID — UUID only,
+ * - or the raw UUID itself — UUID only.
+ * Returns null when no UUID can be found. Pure — covered by unit tests. Scanner
+ * output and pasted text are untrusted input; they only ever reach the app
+ * through here, and this fails closed on anything that isn't a UUID.
+ */
+fun parseContactPayload(input: String): ParsedContact? {
+    val trimmed = input.trim()
+    if (trimmed.startsWith("{")) {
+        try {
+            val obj = JSONObject(trimmed)
+            val accountId = obj.optString("account_id")
+            if (UUID_REGEX.matches(accountId)) {
+                val key = obj.optString("identity_key").ifBlank { null }
+                return ParsedContact(accountId.lowercase(), key)
+            }
+        } catch (_: JSONException) {
+            // Fall through to the generic UUID search.
+        }
+    }
+    // Non-JSON (link / raw UUID): only the UUID is recoverable, no key to pin.
+    val id = UUID_REGEX.find(trimmed)?.value?.lowercase() ?: return null
+    return ParsedContact(id, null)
+}
+
+/** UUID-only convenience over [parseContactPayload]. Covered by unit tests. */
+fun parseContactInput(input: String): String? = parseContactPayload(input)?.accountId
+
+private val UUID_REGEX = Regex(
+    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+)

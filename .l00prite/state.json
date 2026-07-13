@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "project_name": "sublemonable",
-  "current_goal": "Fix the relay transport hierarchy to I2P-primary/Tor-fallback/clearnet-last-resort, verify RELAY_ONION_ADDRESS build injection across platforms, and set up l00prite memory",
+  "current_goal": "Wire up 4 broken/missing Android flows from v1.5.0-beta manual testing: Orbot install path, first-run registration reliability, connection auto-retry + transport surfacing, and contact-exchange QR/scan/copy",
   "current_phase": "implemented",
   "active_agent": null,
   "last_agent": "claude",
-  "last_updated": null,
+  "last_updated": "2026-07-13",
   "status": "in_progress",
   "blocked": false,
   "blocker_reason": null,
@@ -14,5 +14,5 @@
   "pending_event_count": 0,
   "review_response_required": false,
   "ci_status": "unknown",
-  "next_recommended_action": "Human review and merge of branch claude/l00prite-i2p-relay-setup-kdahma; operational deploy steps in todos.md require server access outside a coding session"
+  "next_recommended_action": "CI-build + on-device verify branch claude/l00prite-android-ui-wiring-58wvq6 (no Android SDK in the coding session, so nothing was built there); then human review and PR. See .l00prite/todos.md 'Next'."
 }

@@ -112,8 +112,11 @@ dependencies {
     // works correctly (and satisfies lintVitalRelease).
     implementation(libs.androidx.fragment)
 
-    // QR codes for key verification (pure-Java, offline)
+    // QR codes for key verification + contact exchange (pure-Java, offline)
     implementation(libs.zxing.core)
+    // In-app QR scanner (camera). FOSS, no Play Services — F-Droid-friendly.
+    // Keeps the explicit zxing-core pin above (this pulls an older core).
+    implementation(libs.zxing.android.embedded)
 
     // Unit tests (pure JVM logic only)
     testImplementation(libs.junit)

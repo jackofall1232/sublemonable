@@ -676,3 +676,181 @@ Multi-track session (Phase 0/1 sequential, then Tracks A–D). Nothing committed
 - Docs/todos updated (§7, `nativeTransport.ts`, todos Done). Now BOTH native WS paths
   (clearnet/Tor and I2P) use the query param; only the in-browser `WebSocket` keeps the
   subprotocol header (browsers tolerate the non-echo).
+
+---
+
+### Run — claude (Android UI wiring; Fable as advisor + reviewer)
+- **Goal:** Wire up 4 broken/missing Android flows found in manual v1.5.0-beta testing (all
+  UI-exists-but-not-wired): (1) no Orbot install path, (2) Account ID "Not registered yet"
+  with no registration action, (3) Connection "Offline" with no retry/transport surfacing,
+  (4) no QR/link to add contacts. Do NOT redesign the locked transport hierarchy, the
+  dead-drop protocol, or add a manual Tor toggle.
+- **Triggering event:** none (manual-test-driven roadmap work).
+- **Reviewer/comment reference:** none (pre-PR). Fable ran as design advisor (root-cause
+  confirmation + judgment calls) and as adversarial diff reviewer before commit.
+- **Decision:** Normal work. Each issue's root cause was confirmed against the code before
+  fixing (below). Priority order fixed #2→#3→#4→#1 as briefed (#2 registration underpins #3
+  connection underpins #4 session establishment; #1 independent).
+- **Root causes (stated before fixing):**
+  - #2: identity+registration IS wired in `MessagingCoordinator.start()`, but the whole
+    `ensureIdentity→register→createSession→ws.connect` ran inside ONE `runCatching{}` that
+    swallowed every exception with no surfacing and NO retry, invoked once from
+    `LaunchedEffect(unlocked)`. One transient unreachability at unlock time ⇒ `accountId`
+    stays null ⇒ "Not registered yet" permanently. `start()`'s own comment claiming
+    "reconnection is attempted by … the next foreground start()" was false (no lifecycle hook;
+    `stop()` had zero callers).
+  - #3: `WsClient.openSocket()` early-returns while `currentToken==null`, so its socket-level
+    backoff never engaged if `start()` failed before `ws.connect()` — genuine zero-retry.
+    Secondary spiral (Fable-found): 15-min JWTs + `refreshSession()` never called + WsClient
+    reconnecting forever with the same dead token ⇒ perpetual 401 loop after any 15-min gap.
+    The status line only mapped `WsClient.ConnectionState`; the `TransportState` enum existed
+    but was consumed nowhere.
+  - #4: `NewChatDialog` was paste-only; `QrCode`+`parseContactInput` (ContactExchangePayload
+    aware) existed but nothing generated the payload / scanned / copied a link.
+  - #1: `TorIntegration.orbotInstallIntent()` already existed but was never surfaced;
+    detection + manifest `<queries>` were already correct.
+- **Fix implemented (smallest correct diff per issue):**
+  - #2/#3: rewrote `start()` as a single-flight, backoff-retrying (≤60s) boot supervisor;
+    identity + one-time prekeys generated ONCE before the loop and reused across register
+    retries (avoids orphaning a signed prekey + 100 one-time keys per failed attempt);
+    register kept single-identity by the `accountId==null` guard + single-flight. Added a
+    coordinator `connectivity: StateFlow<Connectivity>` (OFFLINE/CONNECTING/ONLINE) = combine
+    of `ws.connectionState` + a `_linking` intent flag, consumed by the UI. `WsClient` gained
+    `onAuthExpired()` (401/403 handshake ⇒ coordinator re-sessions instead of spinning) and a
+    close-before-open guard in `openSocket()`. `SettingsScreen` now derives+shows the active
+    transport (Tor / clearnet-with-warning / offline) from connectivity+torEnabled+torAvailable
+    using the existing `TransportState` enum (I2P never emitted on mobile), reusing the
+    canonical CLEARNET_WARNING wording; Account ID subtitle is status-aware
+    ("Setting up your encrypted identity…" while connecting).
+  - #4: new `AddContactScreen` (My-QR via `ContactExchangePayload` JSON, "Copy contact code",
+    zxing scanner, paste). `parseContactInput`+`UUID_REGEX` moved verbatim from the deleted
+    `NewChatDialog.kt` into new `ContactExchange.kt` (same package ⇒ `ContactInputParserTest`
+    import unchanged); added `buildContactExchangePayload` mirroring iOS
+    `SignalManager.contactExchangePayload()` byte-for-byte in shape. Scanner =
+    `com.journeyapps:zxing-android-embedded:4.3.0` (FOSS, no Play Services, F-Droid-friendly)
+    behind a `SecureCaptureActivity` subclass that applies FLAG_SECURE (keeps the app-wide
+    every-Activity-is-secure invariant). CAMERA permission + `uses-feature required=false`
+    added; manifest "no camera" comment corrected. FAB now routes to `Route.AddContact`.
+  - #1: added `TorIntegration.ORBOT_FDROID_URL`/`orbotFDroidIntent()`; `SettingsScreen` shows
+    a "Get Orbot" action (Play Store, falling back to the F-Droid URL on a de-Googled device —
+    `ActivityNotFoundException`-guarded, never crashes) plus an explicit F-Droid link when
+    Orbot is absent; `torAvailable` re-checked on resume (`LifecycleResumeEffect`) so the
+    toggle un-disables after install.
+- **Deviation from briefing (recorded):** Issue 4 says "encode the dead-drop token per the
+  dead_drop/drop_id spec." The actual cross-client contact-add spec is `ContactExchangePayload`
+  ({version:"1",account_id,identity_key}) — used by iOS/web/the Android parser+test. The
+  dead-drop token is a single-use anonymous *messaging* capability (Ghost mode,
+  packages/crypto/deaddrop.ts); no client parses it as a contact-add input, so using it here
+  would BE inventing a new contact-add protocol (the opposite of the instruction). Used
+  ContactExchangePayload. "Copy link" ships as "Copy contact code" (the lossless JSON) rather
+  than a dead `sublemonable.example` URL — no real invite domain exists in-repo, and the JSON
+  is the widest-parseable, lossless share (Fable-concurred).
+- **Changed files:** M `apps/android/app/src/main/java/com/sublemonable/app/MessagingCoordinator.kt`,
+  `.../net/WsClient.kt`, `.../MainActivity.kt`, `.../ui/screens/SettingsScreen.kt`,
+  `.../tor/TorIntegration.kt`, `app/build.gradle.kts`, `gradle/libs.versions.toml`,
+  `app/src/main/AndroidManifest.xml`; A `.../ui/screens/AddContactScreen.kt`,
+  `.../ui/components/ContactExchange.kt`, `.../ui/components/SecureCaptureActivity.kt`,
+  `app/src/test/java/.../ContactExchangeTest.kt`; D `.../ui/components/NewChatDialog.kt`.
+  Intentionally UNTOUCHED: `data/ConnectionMode.kt`/`TransportState` (packages/protocol
+  lockstep), all crypto, the transport hierarchy priority, the existing Tor toggle, dead-drop.
+- **Tests run / Verification:**
+  - `command`: (none executable) — **no Android SDK / kotlinc in this session**, so the app
+    could NOT be built and unit/instrumented tests could NOT be run here. This is stated
+    plainly, not marked done.
+  - Static review: full manual re-read of every changed file; Fable adversarial multi-agent
+    diff review across 4 dimensions (compile/type, fix-logic/concurrency, security/constraints,
+    runtime) with every finding independently verified — **14 findings raised, 14 CONFIRMED
+    (0 false positives)**, incl. 2 blockers: a real Kotlin compile error in the boot loop
+    (`suspend { api.register(...) }` inferred `suspend () -> String`, not `Unit`) and a
+    guaranteed Settings crash from `lifecycle 2.8.0` + Compose 1.6.x (`LocalLifecycleOwner not
+    present`, b/336842920). ALL 14 fixed (see the fix list in the diff/commits).
+  - `command`: `kotlinc 1.9.24` compile of `MessagingCoordinator.kt` + `net/WsClient.kt` +
+    `net/ApiClient.kt` (byte-identical repo files, against signature-faithful stubs + real
+    okhttp/okio/coroutines/org.json jars), run by the Fable verification pass (NOT in my own
+    session — I have no SDK). `exit_code`: 0. `summary`: zero errors/warnings on the files under
+    test — the compile-blocker fix is proven, not inferred. That pass found 2 further residual
+    issues, both fixed: a cross-thread visibility race on `WsClient.webSocket` (added `@Volatile`)
+    and a missing intent re-check on the queued relink after `onAuthExpired` (guarded with
+    `if (_linking.value) start()`).
+  - **Unverified — MUST validate in CI / on-device before release:** (a) the whole build
+    (Gradle assemble + `testDebugUnitTest`, incl. new `ContactExchangeTest`); (b)
+    `zxing-android-embedded` dependency resolution + manifest merge + the FLAG_SECURE camera
+    preview rendering under `Theme.Material.NoActionBar`; (c) the boot-supervisor retry /
+    auth-expiry / connectivity behavior against a live relay; (d) **I2P and Tor transports were
+    NOT live-tested from this session** (mobile I2P remains an honest stub; Tor needs Orbot on a
+    real device).
+- **Response drafted/sent:** none (no PR opened yet).
+- **Event status:** not applicable.
+- **Failures:** Could not build/run any Android target locally (no SDK). No code failures found
+  in self-review; review-found items (if any) addressed before commit.
+- **Decisions:** Contact-add = ContactExchangePayload, not dead-drop token (see Deviation).
+  Connection retry lives in the coordinator supervisor (WsClient keeps only socket-level
+  reconnect); transport derivation is UI-level, keeping `WsClient`/enums untouched.
+- **Confidence:** Medium — logic reviewed and adversarially checked, but zero build/runtime
+  verification in-session; the scanner (new dep + camera Activity + manifest merge) is the
+  highest-risk, least-verifiable piece.
+- **Next action:** Open PR for maintainer review; run CI (build + unit tests); on-device
+  smoke-test registration/connection/scanner and the Get-Orbot flow.
+- **Do-not-retry notes:** Do not reintroduce the single blanket `runCatching{}` boot with no
+  retry (root cause of #2/#3). Do not use the dead-drop token for contact-add. Do not build a
+  camera scanner inside MainActivity (FLAG_SECURE + camera interplay; use the separate
+  SecureCaptureActivity).
+- **Lock:** none (no protected-path write; no `lock.json` in this repo's `.l00prite/`).
+
+#### Addendum — PR #14 review round + CI hardening
+- **PR opened:** jackofall1232/sublemonable#14. Bots reviewed: gemini-code-assist, Copilot,
+  Vercel (website preview — Ready, no action).
+- **Discovery (important):** the CI `android` job was a **stub** — it only ran `test -f` on two
+  Gradle files, no SDK, no build, no tests. So nothing in the pipeline actually compiled or
+  tested the Android app; my earlier "CI is the real gate" was wrong. With user sign-off,
+  replaced it with a real job: `android-actions/setup-android@v3` + `sdkmanager` platform/
+  build-tools + `./gradlew :app:assembleDebug :app:testDebugUnitTest`. This is now the genuine
+  build/test gate for this PR and all future ones.
+- **Review findings addressed (7, all valid, all fixed):**
+  - [Gemini HIGH] adding yourself as a contact → establishing a Double Ratchet session with your
+    own identity key can corrupt the session store: guarded in `AddContactScreen` (visible
+    "that's your own code" error) + a defensive backstop in `MainActivity.onAdd`.
+  - [Gemini HIGH] `@Volatile` on cross-thread `MessagingCoordinator.onForcedLogout`/`linkJob`.
+  - [Gemini HIGH]/[Copilot HIGH] `@Volatile` on `WsClient.reconnectJob`/`reconnectAttempts`
+    (also added to `currentToken`; `webSocket`/`intentionallyClosed` were already done).
+  - [Gemini MEDIUM] identity-fingerprint keystore/crypto moved off the main thread
+    (`LaunchedEffect` + `withContext(Dispatchers.Default)`), collected as state.
+  - [Gemini MEDIUM] contact-exchange payload build (keystore + signing) moved off the main
+    thread the same way.
+  - [Copilot MEDIUM] camera is optional (`uses-feature required=false`) but the scan button was
+    always shown — now hidden on camera-less devices (`FEATURE_CAMERA_ANY`); paste still works.
+  - [Copilot MEDIUM] boot-supervisor backoff off-by-one (first retry waited 2s not 1s) — now
+    computes the delay from the current attempt before incrementing, matching WsClient.
+- **Still unbuilt in my session** (no SDK) — the new CI job is now the first real build; watching
+  it via the PR subscription.
+
+#### Addendum — out-of-band identity-key pinning (Codex P2, maintainer-approved)
+- **Finding (Codex, valid):** the scanned/pasted contact QR is a full
+  `ContactExchangePayload`, but Android reduced it to just the UUID and discarded the
+  `identity_key` — so `contactIdentityKeyBase64` stayed null, pre-first-message Verify showed the
+  LOCAL fingerprint, and a user could "verify" without ever comparing the QR's key. iOS keeps the
+  key; Android didn't (pre-existing in the old paste dialog, inherited by the new scanner).
+- **Decision:** user chose the PROPER fix (not the naive carry-only, which would let the relay
+  swap the key on first send after the user verified). This is a sanctioned crypto/verification
+  trust-model change (constraints.md gate — explicit user go-ahead obtained).
+- **Implemented (out-of-band key pinning + mismatch detection):**
+  - `parseContactPayload()` now returns both `account_id` and the optional `identity_key`
+    (`parseContactInput` delegates to it — pinned test unchanged); scanner/paste carry the key
+    through (`scannedIdentityKey` preserves it when the field only shows the UUID).
+  - New `Conversation.pinnedIdentityKeyBase64`; adding from a QR sets both
+    `contactIdentityKeyBase64` (so Verify shows the right safety number immediately) and
+    `pinnedIdentityKeyBase64` (the pin). Bare UUID/link → no pin (TOFU, unchanged).
+  - `MessagingCoordinator.sendText`: on session establishment, if the relay's prekey-bundle
+    identity key ≠ the pinned key, it REFUSES to establish/send and calls
+    `ConversationRepository.flagIdentityMismatch()` (reuses the dormant `keyChanged` field →
+    existing `SecurityState.WARNING` badge in the chat header, verified reset, pinned key KEPT —
+    the relay's substitute is never adopted). Enforced on the outbound bundle-fetch path (the
+    server-substitution vector); inbound is protected by the message's own crypto + libsignal's
+    identity store.
+  - Tests: `parseContactPayload` extracts the key; bare-UUID/link and key-less JSON yield a null
+    pin.
+- **Known/acceptable behavior (noted, not a bug):** on a pin mismatch the in-flight message is
+  dropped (fail-closed) and the WARNING badge is the signal; a legitimate key rotation shows the
+  same warning and is resolved by re-scanning the contact's new QR (re-add updates the pin). A
+  richer "accept new key" flow + a failed-message state are follow-ups, not done here.
+- Still unbuilt in-session (no SDK) — relying on the now-real Android CI job.
