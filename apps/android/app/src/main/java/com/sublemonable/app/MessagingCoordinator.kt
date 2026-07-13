@@ -17,13 +17,21 @@ import com.sublemonable.app.net.ApiClient
 import com.sublemonable.app.net.WsClient
 import com.sublemonable.app.notifications.MessagingNotifications
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import kotlin.coroutines.coroutineContext
+import kotlin.math.min
 
 /**
  * Glue between crypto, transport and the in-memory repositories. This is the
@@ -32,7 +40,9 @@ import java.util.UUID
  *
  * Network failures are swallowed silently into offline state: an error path
  * that logged envelope details would be a privacy bug, so there is nothing
- * to log by construction.
+ * to log by construction. Instead of failing dead, the boot sequence retries
+ * on a capped backoff so a transient outage at unlock time can't strand the
+ * account unregistered and offline forever (see [start]).
  */
 class MessagingCoordinator(
     private val appContext: Context,
@@ -47,8 +57,34 @@ class MessagingCoordinator(
     private val _typingPeers = MutableStateFlow<Set<String>>(emptySet())
     val typingPeers: StateFlow<Set<String>> = _typingPeers.asStateFlow()
 
+    /**
+     * True while the app is unlocked and EXPECTS to be connected — set in
+     * [start] and cleared only on an intentional teardown ([stop],
+     * [onSessionRevoked], [deleteAccountAndWipe]). Combined with the raw socket
+     * state it keeps the UI showing "connecting" (never a silent, dead
+     * "offline") whenever we intend to be online but the socket is momentarily
+     * down and WsClient is retrying.
+     */
+    private val _linking = MutableStateFlow(false)
+
+    /** High-level connectivity for the UI: boot supervisor + socket combined. */
+    enum class Connectivity { OFFLINE, CONNECTING, ONLINE }
+
+    val connectivity: StateFlow<Connectivity> =
+        combine(ws.connectionState, _linking) { wsState, linking ->
+            when (wsState) {
+                WsClient.ConnectionState.CONNECTED -> Connectivity.ONLINE
+                WsClient.ConnectionState.CONNECTING -> Connectivity.CONNECTING
+                WsClient.ConnectionState.DISCONNECTED ->
+                    if (linking) Connectivity.CONNECTING else Connectivity.OFFLINE
+            }
+        }.stateIn(scope, SharingStarted.Eagerly, Connectivity.OFFLINE)
+
     /** Set when the server revokes our session — UI returns to the lock gate. */
     var onForcedLogout: (() -> Unit)? = null
+
+    /** Single-flight guard: only one boot/relink sequence runs at a time. */
+    private var linkJob: Job? = null
 
     init {
         ws.listener = this
@@ -58,35 +94,82 @@ class MessagingCoordinator(
 
     /**
      * Boot sequence: identity -> registration (first run) -> challenge-signed
-     * session -> WebSocket. Safe to call repeatedly; safe to fail offline.
+     * session -> WebSocket. Safe to call repeatedly (single-flight), safe to
+     * fail offline. Retries the whole sequence on a capped exponential backoff
+     * until it succeeds, so registration and connection come up automatically
+     * once the relay is reachable — no manual user action, ever.
+     *
+     * Also used to re-authenticate after [onAuthExpired]: with an account
+     * already registered, the loop skips registration and just mints a fresh
+     * session + socket.
      */
+    @Synchronized
     fun start() {
-        scope.launch {
-            runCatching {
+        if (linkJob?.isActive == true) return
+        _linking.value = true
+        linkJob = scope.launch { bootstrapLoop() }
+    }
+
+    private suspend fun bootstrapLoop() {
+        // One-time prekeys are generated (and persisted) at most ONCE and reused
+        // across register retries: regenerating per attempt would orphan a
+        // signed prekey + a full batch into the encrypted store on every failed
+        // register. Identity generation is idempotent and stays inside the loop,
+        // so a transient keystore hiccup retries instead of dead-ending the loop
+        // with nothing scheduled to recover it.
+        var registration: (suspend () -> Unit)? = null
+        var attempt = 0
+        while (coroutineContext.isActive && _linking.value) {
+            val ok = runCatching {
                 signal.ensureIdentity()
                 if (api.accountId == null) {
-                    val signedPreKey = signal.generateSignedPreKey()
-                    val oneTimePreKeys = signal.generateOneTimePreKeys()
-                    api.register(
-                        identityKeyBase64 = signal.localIdentityPublicKeyBase64(),
-                        registrationId = signal.localRegistrationId(),
-                        signedPreKey = signedPreKey,
-                        oneTimePreKeys = oneTimePreKeys,
-                    )
+                    if (registration == null) {
+                        val signedPreKey = signal.generateSignedPreKey()
+                        val oneTimePreKeys = signal.generateOneTimePreKeys()
+                        registration = suspend {
+                            api.register(
+                                identityKeyBase64 = signal.localIdentityPublicKeyBase64(),
+                                registrationId = signal.localRegistrationId(),
+                                signedPreKey = signedPreKey,
+                                oneTimePreKeys = oneTimePreKeys,
+                            )
+                            // register() returns the new account id; the loop
+                            // only needs its Unit side effect (accountId stored).
+                            Unit
+                        }
+                    }
+                    // NOTE: if the register POST reaches the server but the
+                    // response is lost (process death mid-flight), accountId is
+                    // never stored and a retry mints a second, orphaned account
+                    // (public keys only). The client-side null-guard +
+                    // single-flight prevents the common case, not this window.
+                    registration?.invoke()
                 }
                 api.createSession(signal::signLoginChallenge)
-                api.accessToken?.let(ws::connect)
-                // 7-day signed prekey rotation, piggybacked on startup.
-                signal.rotateSignedPreKeyIfNeeded()?.let { rotated ->
-                    api.uploadPreKeys(emptyList(), rotated)
+                val token = api.accessToken ?: error("no access token issued")
+                ws.connect(token)
+            }.isSuccess
+            if (ok) {
+                // Reaching a live socket IS success. Signed-prekey rotation is
+                // best-effort and must NOT fail the boot — a failed upload here
+                // would otherwise tear down the healthy socket on the next
+                // iteration. WsClient owns socket-level reconnects from here;
+                // auth expiry comes back through onAuthExpired().
+                runCatching {
+                    signal.rotateSignedPreKeyIfNeeded()?.let { rotated ->
+                        api.uploadPreKeys(emptyList(), rotated)
+                    }
                 }
+                return
             }
-            // On failure the app stays usable offline; reconnection is
-            // attempted by WsClient and the next foreground start().
+            attempt += 1
+            delay(min(MAX_BACKOFF_MS, BASE_BACKOFF_MS shl min(attempt, MAX_BACKOFF_SHIFT)))
         }
     }
 
     fun stop() {
+        _linking.value = false
+        linkJob?.cancel()
         ws.presenceUpdate(online = false)
         ws.disconnect()
     }
@@ -152,6 +235,8 @@ class MessagingCoordinator(
     /** Wipes the server account AND the local keys/messages. Irreversible. */
     fun deleteAccountAndWipe(onComplete: () -> Unit) {
         scope.launch {
+            _linking.value = false
+            linkJob?.cancel()
             runCatching { api.deleteAccount() }
             ws.disconnect()
             messages.clearAll()
@@ -220,13 +305,38 @@ class MessagingCoordinator(
     }
 
     override fun onSessionRevoked() {
+        _linking.value = false
+        linkJob?.cancel()
         messages.clearAll()
         api.clearTokens()
         onForcedLogout?.invoke()
     }
 
+    override fun onAuthExpired() {
+        // Token rejected mid-session. Wait for any in-flight boot to finish
+        // (it's the one that just connected), THEN re-run the boot sequence —
+        // registration is skipped (account exists), so this re-mints a fresh
+        // session + socket. Latching via join() avoids the race where start()
+        // no-ops against a still-active linkJob and the relink is lost.
+        val current = linkJob
+        scope.launch {
+            current?.join()
+            // Re-check intent after the join window: a teardown
+            // (stop/logout/deleteAccount) may have run in between, and relinking
+            // then would resurrect the connection — or, post-delete, silently
+            // register a brand-new account.
+            if (_linking.value) start()
+        }
+    }
+
     override fun onServerError(code: String, message: String) {
         // Server error codes carry no user data; v1 surfaces them only as
         // connection state, never as raw strings.
+    }
+
+    private companion object {
+        const val BASE_BACKOFF_MS = 1_000L
+        const val MAX_BACKOFF_MS = 60_000L
+        const val MAX_BACKOFF_SHIFT = 6
     }
 }

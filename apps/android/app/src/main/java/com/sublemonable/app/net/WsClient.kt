@@ -57,6 +57,14 @@ class WsClient(
         /** Force logout: wipe in-memory state and re-authenticate. */
         fun onSessionRevoked()
 
+        /**
+         * The JWT was rejected during the WebSocket handshake (401/403).
+         * Reconnecting with the same dead token would spin forever, so the
+         * coordinator re-authenticates and calls [connect] with a fresh token
+         * instead of the socket retrying on its own.
+         */
+        fun onAuthExpired()
+
         /** Server error event. [message] is a server code, never content. */
         fun onServerError(code: String, message: String)
     }
@@ -68,9 +76,14 @@ class WsClient(
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
+    // @Volatile: written on coroutine (Dispatchers.Default) threads but read on
+    // OkHttp callback threads — the socketListener staleness guard and the
+    // intentional-close guard depend on cross-thread visibility.
+    @Volatile
     private var webSocket: WebSocket? = null
     private var reconnectJob: Job? = null
     private var reconnectAttempts = 0
+    @Volatile
     private var intentionallyClosed = false
     private var currentToken: String? = null
 
@@ -134,6 +147,13 @@ class WsClient(
 
     private fun openSocket() {
         val token = currentToken ?: return
+        // Abandon any previous socket: drop our reference FIRST so its late
+        // terminal callbacks are recognized as stale (see the identity check in
+        // socketListener) and can't clobber the new socket's state or trigger a
+        // churn loop, then close it.
+        val previous = webSocket
+        webSocket = null
+        previous?.close(CLOSE_NORMAL, null)
         _connectionState.value = ConnectionState.CONNECTING
         val request = Request.Builder()
             .url(wsUrl)
@@ -142,13 +162,18 @@ class WsClient(
         webSocket = client.newWebSocket(request, socketListener)
     }
 
+    // The listener is shared across sockets. Every callback first checks it came
+    // from the CURRENT socket — an abandoned socket's late onClosed/onFailure
+    // must not flip state or schedule a reconnect (that would flap forever).
     private val socketListener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (webSocket !== this@WsClient.webSocket) return
             reconnectAttempts = 0
             _connectionState.value = ConnectionState.CONNECTED
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            if (webSocket !== this@WsClient.webSocket) return
             // Frames carry only ciphertext envelopes and routing metadata.
             // They are parsed and dispatched — NEVER logged.
             val frame = runCatching { JSONObject(text) }.getOrNull() ?: return
@@ -158,13 +183,26 @@ class WsClient(
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (webSocket !== this@WsClient.webSocket) return
             _connectionState.value = ConnectionState.DISCONNECTED
             scheduleReconnect()
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (webSocket !== this@WsClient.webSocket) return
             _connectionState.value = ConnectionState.DISCONNECTED
-            scheduleReconnect()
+            // Deliberate teardown (disconnect/logout/delete) must never re-enter
+            // reconnect or re-auth.
+            if (intentionallyClosed) return
+            // A rejected token (JWTs live 15 min) would make every socket-level
+            // retry a fresh 401 forever. Hand back to the coordinator to
+            // re-authenticate instead of scheduling a doomed reconnect.
+            if (response?.code == 401 || response?.code == 403) {
+                intentionallyClosed = true
+                listener?.onAuthExpired()
+            } else {
+                scheduleReconnect()
+            }
         }
     }
 

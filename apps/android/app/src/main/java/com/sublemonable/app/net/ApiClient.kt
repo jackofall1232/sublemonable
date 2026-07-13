@@ -7,6 +7,9 @@ package com.sublemonable.app.net
 
 import com.sublemonable.app.crypto.KeyStoreManager
 import com.sublemonable.app.crypto.SignalProtocolManager
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
@@ -39,6 +42,13 @@ class ApiClient(
 
     private val authPrefs = keyStoreManager.prefs(KeyStoreManager.PREFS_AUTH)
 
+    /**
+     * Observable mirror of [accountId] so the UI updates the moment
+     * registration lands, without depending on some other state re-emitting.
+     */
+    private val _accountId = MutableStateFlow(authPrefs.getString(KEY_ACCOUNT_ID, null))
+    val accountIdFlow: StateFlow<String?> = _accountId.asStateFlow()
+
     class ApiException(val code: Int, message: String) : IOException(message)
 
     data class SessionTokens(val accessToken: String, val refreshToken: String)
@@ -54,6 +64,7 @@ class ApiClient(
         get() = authPrefs.getString(KEY_ACCOUNT_ID, null)
         private set(value) {
             authPrefs.edit().putString(KEY_ACCOUNT_ID, value).apply()
+            _accountId.value = value
         }
 
     val accessToken: String?
@@ -189,6 +200,7 @@ class ApiClient(
         } finally {
             clearTokens()
             authPrefs.edit().remove(KEY_ACCOUNT_ID).apply()
+            _accountId.value = null
         }
     }
 

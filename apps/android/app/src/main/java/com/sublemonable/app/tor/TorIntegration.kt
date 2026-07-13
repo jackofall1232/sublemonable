@@ -50,10 +50,19 @@ object TorIntegration {
         context.sendBroadcast(intent)
     }
 
-    /** Opens the Play/F-Droid page for Orbot so the user can install it. */
+    /** F-Droid listing for Orbot — the fallback when no Play Store is present. */
+    const val ORBOT_FDROID_URL = "https://f-droid.org/packages/$ORBOT_PACKAGE/"
+
+    /** Opens the Play Store page for Orbot so the user can install it. */
     fun orbotInstallIntent(): Intent = Intent(
         Intent.ACTION_VIEW,
         android.net.Uri.parse("market://details?id=$ORBOT_PACKAGE"),
+    )
+
+    /** Opens the F-Droid listing for Orbot (second install option). */
+    fun orbotFDroidIntent(): Intent = Intent(
+        Intent.ACTION_VIEW,
+        android.net.Uri.parse(ORBOT_FDROID_URL),
     )
 
     /** SOCKS proxy pointed at Orbot for OkHttp. */
