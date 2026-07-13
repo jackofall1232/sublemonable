@@ -53,7 +53,7 @@ jobs:
         run: test -z "$(gofmt -l .)"
 
   android:
-    name: Android — compile check
+    name: Android — build & unit test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,10 +61,14 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - name: Validate Gradle project structure
-        run: |
-          test -f apps/android/settings.gradle.kts
-          test -f apps/android/app/build.gradle.kts
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install SDK packages
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - name: Build debug APK + run unit tests
+        working-directory: apps/android
+        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug :app:testDebugUnitTest
 
   desktop-linux:
     name: Desktop — Linux build (.deb, .AppImage, .rpm)
