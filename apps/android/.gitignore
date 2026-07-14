@@ -15,6 +15,9 @@ captures/
 # Keystores — release signing keys must NEVER be committed
 *.jks
 *.keystore
+# Local signing config (paths + passwords for assembleRelease). Commit only
+# keystore.properties.example, never the real file.
+keystore.properties
 
 # Misc
 *.apk

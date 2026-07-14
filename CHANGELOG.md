@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Android release-signing + publish pipeline.** `apps/android/app/build.gradle.kts` now wires a
+  release `signingConfig` sourced from a gitignored `keystore.properties` (or env vars), falling back
+  to an unsigned build when absent so keyless checkouts and CI still assemble. A new
+  `.github/workflows/release-apk.yml` builds, signs (from opt-in GitHub Secrets behind a protected
+  environment), verifies the signature, checksums, and publishes the APK as a GitHub Release —
+  uploading an unsigned artifact plus offline-signing instructions when no keystore is configured.
+  `docs/RELEASING_ANDROID.md` documents the local and CI paths, the signing-key continuity checks,
+  and the website/mirror pointer flip.
+
 ## [1.5.1] - 2026-07-14
 
 ### Added
