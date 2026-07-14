@@ -1,0 +1,221 @@
+# Sublemonable — Copyright (C) 2026 Sublemonable contributors
+# Licensed under the GNU Affero General Public License v3.0 or later.
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# Builds the Android release APK, and — when signing secrets are configured —
+# signs it and publishes a GitHub Release with the APK + SHA256SUMS. Without the
+# secrets it uploads an UNSIGNED APK as a build artifact plus signing
+# instructions, so the maintainer can sign offline on trusted hardware.
+#
+# The signing key is the app's trust anchor. Putting it in GitHub Secrets is a
+# custody decision: anyone with write access to workflow files can exfiltrate a
+# secret a workflow can read. The `environment: android-release` gate below lets
+# you require a reviewer before any run can access the secrets — configure that
+# environment (with required reviewers) in repo Settings → Environments. If you
+# prefer the key never leave your machine, add no secrets and sign the uploaded
+# unsigned artifact locally. See docs/RELEASING_ANDROID.md.
+#
+# Required secrets (only for the signed path):
+#   ANDROID_KEYSTORE_BASE64    base64 of your release .jks  (base64 < release.jks | tr -d '\n')
+#   ANDROID_KEYSTORE_PASSWORD  keystore password
+#   ANDROID_KEY_ALIAS          key alias
+#   ANDROID_KEY_PASSWORD       key password
+# Optional:
+#   ANDROID_SIGNING_CERT_SHA256  expected signing-cert SHA-256; when set, publishing
+#                                aborts unless the built APK's cert matches it
+#   RELAY_ONION_ADDRESS          baked into the build if your app targets a relay onion
+
+name: Release APK
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build and publish (e.g. v1.5.1). Create and push the tag first — the run checks it out."
+        required: true
+
+permissions:
+  contents: write # create the GitHub Release and upload assets
+
+jobs:
+  release:
+    name: Build, sign & publish Android release APK
+    runs-on: ubuntu-latest
+    environment: android-release # gate secrets behind a protected environment
+    steps:
+      - name: Check out the exact ref being released
+        uses: actions/checkout@v4
+        with:
+          # Build precisely the tag we publish. On workflow_dispatch this is the
+          # input tag; on a tag push it is the pushed tag. Without an explicit
+          # ref, a dispatched run would build the default branch while publishing
+          # a Release named for a different tag — a release-integrity bug.
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve release tag
+        id: meta
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Assert tag matches app versionName
+        working-directory: apps/android
+        run: |
+          VN=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          TAG="${{ steps.meta.outputs.tag }}"
+          case "$TAG" in
+            "v$VN"|"v$VN-beta")
+              echo "Tag $TAG matches versionName $VN." ;;
+            *)
+              echo "::error::Tag '$TAG' does not match app versionName '$VN' (expected 'v$VN' or 'v$VN-beta'). Bump versionName in app/build.gradle.kts or retag."
+              exit 1 ;;
+          esac
+
+      - name: Decode signing keystore (if configured)
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "keystore_path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
+            echo "Keystore decoded; building a SIGNED release."
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret set — building an UNSIGNED release APK. Sign it locally with apksigner before distributing."
+          fi
+
+      - name: Build release APK
+        working-directory: apps/android
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ steps.signing.outputs.keystore_path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          RELAY_ONION_ADDRESS: ${{ secrets.RELAY_ONION_ADDRESS }}
+        run: ./gradlew --no-daemon --stacktrace :app:assembleRelease
+
+      - name: Stage APK + checksum
+        id: stage
+        working-directory: apps/android
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          mkdir -p "$RUNNER_TEMP/dist"
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+            SRC=app/build/outputs/apk/release/app-release.apk
+            OUT="sublemonable-$TAG.apk"
+          else
+            SRC=app/build/outputs/apk/release/app-release-unsigned.apk
+            OUT="sublemonable-$TAG-unsigned.apk"
+          fi
+          cp "$SRC" "$RUNNER_TEMP/dist/$OUT"
+          ( cd "$RUNNER_TEMP/dist" && sha256sum "$OUT" > SHA256SUMS )
+          echo "apk=$OUT" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(cut -d' ' -f1 < "$RUNNER_TEMP/dist/SHA256SUMS")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify signature & enforce signing-cert continuity
+        id: verify
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
+        run: |
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          APK="$RUNNER_TEMP/dist/${{ steps.stage.outputs.apk }}"
+          "$APKSIGNER" verify --print-certs "$APK"
+          norm() { printf '%s' "$1" | tr 'A-F' 'a-f' | tr -cd '0-9a-f'; }
+          ACTUAL=$("$APKSIGNER" verify --print-certs "$APK" \
+            | grep -Eio 'certificate SHA-256 digest: [0-9a-f]+' | head -1 | awk '{print $NF}')
+          echo "cert_sha256=$ACTUAL" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Signing certificate"
+            echo "SHA-256 digest: \`${ACTUAL:-unknown}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$EXPECTED_CERT_SHA256" ]; then
+            # A signature change breaks updates for every existing install (forces an
+            # uninstall, wiping local identity + history). Refuse to publish a build
+            # signed by anything other than the pinned key.
+            if [ "$(norm "$ACTUAL")" != "$(norm "$EXPECTED_CERT_SHA256")" ]; then
+              echo "::error::Signing cert ($ACTUAL) does not match pinned ANDROID_SIGNING_CERT_SHA256 — refusing to publish a release signed with a different key."
+              exit 1
+            fi
+            echo "Signing certificate matches the pinned continuity value."
+          else
+            echo "::warning::ANDROID_SIGNING_CERT_SHA256 not set — signing-key continuity is NOT enforced. Pin it to the previous release's certificate SHA-256 digest to block accidental key changes."
+          fi
+
+      - name: Emit website pointer values (signed builds)
+        if: steps.signing.outputs.signed == 'true'
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          {
+            echo "### Website update — website/src/lib/links.ts"
+            echo '```ts'
+            echo "export const ANDROID_BETA_VERSION = \"$TAG\";"
+            echo "export const ANDROID_BETA_SHA256 = \"${{ steps.stage.outputs.sha256 }}\";"
+            echo '```'
+            echo "Then stage the same file into onion-site/ (SELF_HOSTING.md) so both mirrors match."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish GitHub Release (signed builds)
+        if: steps.signing.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          APK="${{ steps.stage.outputs.apk }}"
+          {
+            echo "Sublemonable Android ${TAG}."
+            echo ""
+            echo "Verify before installing:"
+            echo "- APK SHA-256: \`${{ steps.stage.outputs.sha256 }}\` (\`sha256sum ${APK}\`)"
+            echo "- Signing certificate SHA-256: \`${{ steps.verify.outputs.cert_sha256 }}\` (\`apksigner verify --print-certs ${APK}\`)"
+          } > "$RUNNER_TEMP/notes.md"
+          if gh release create "$TAG" \
+                "$RUNNER_TEMP/dist/${APK}" \
+                "$RUNNER_TEMP/dist/SHA256SUMS" \
+                --repo "${{ github.repository }}" --title "$TAG" --prerelease --verify-tag --notes-file "$RUNNER_TEMP/notes.md"; then
+            echo "Published release $TAG."
+          else
+            echo "::error::Could not create release $TAG. If a release for this tag already exists, its APK + checksum are live download assets — delete it deliberately (gh release delete $TAG) or cut a new tag rather than clobbering live assets in place. If the tag is missing, create and push it first."
+            exit 1
+          fi
+
+      - name: Upload unsigned APK artifact (no keystore configured)
+        if: steps.signing.outputs.signed == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sublemonable-${{ steps.meta.outputs.tag }}-unsigned
+          path: ${{ runner.temp }}/dist/
+          retention-days: 14
+
+      - name: Manual signing instructions (no keystore configured)
+        if: steps.signing.outputs.signed == 'false'
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          {
+            echo "### Unsigned build — sign locally, then create the Release"
+            echo "Download the \`sublemonable-${TAG}-unsigned\` artifact, then on trusted hardware:"
+            echo '```bash'
+            echo "zipalign -p -f 4 sublemonable-${TAG}-unsigned.apk sublemonable-${TAG}-aligned.apk"
+            echo "apksigner sign --ks release.jks --out sublemonable-${TAG}.apk sublemonable-${TAG}-aligned.apk"
+            echo "apksigner verify --print-certs sublemonable-${TAG}.apk"
+            echo "sha256sum sublemonable-${TAG}.apk"
+            echo '```'
+            echo "Then \`gh release create ${TAG} sublemonable-${TAG}.apk --prerelease\` and update links.ts."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -3,9 +3,48 @@
 // See the LICENSE file in the repository root for full license text.
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+}
+
+// Release signing material is loaded from `apps/android/keystore.properties`
+// (gitignored) or, failing that, from environment variables — so the keystore
+// and its passwords never live in the source tree or in this build file. When
+// none are provided (debug builds, CI unit tests, contributor checkouts) the
+// release build is left UNSIGNED and must be signed out-of-band with apksigner.
+// See docs/RELEASING_ANDROID.md.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+fun signingParam(propKey: String, envKey: String): String? =
+    keystoreProperties.getProperty(propKey)
+        ?: providers.environmentVariable(envKey).orNull
+val releaseStoreFilePath = signingParam("storeFile", "ANDROID_KEYSTORE_FILE")
+val releaseStorePassword = signingParam("storePassword", "ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias = signingParam("keyAlias", "ANDROID_KEY_ALIAS")
+val releaseKeyPassword = signingParam("keyPassword", "ANDROID_KEY_PASSWORD")
+val releaseSigningParams = listOf(
+    releaseStoreFilePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword,
+)
+// Sign only when ALL four values are present — gating on the whole set, not just
+// storeFile: a keystore path with a missing password/alias would otherwise reach
+// the signing config as nulls and fail the build obscurely.
+val hasReleaseSigning = releaseSigningParams.all { !it.isNullOrBlank() }
+// A partial config is almost always a mistake — fail loudly rather than silently
+// falling back to an unsigned build the operator believed was signed.
+if (!hasReleaseSigning && releaseSigningParams.any { !it.isNullOrBlank() }) {
+    throw GradleException(
+        "Incomplete release signing config: provide all of storeFile, storePassword, keyAlias, " +
+            "keyPassword (via keystore.properties or the ANDROID_KEYSTORE_FILE / " +
+            "ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD env vars), or none. " +
+            "See docs/RELEASING_ANDROID.md.",
+    )
 }
 
 android {
@@ -33,6 +72,19 @@ android {
         )
     }
 
+    signingConfigs {
+        // Declared only when a full keystore config was provided; otherwise no
+        // signing config exists and assembleRelease yields an unsigned apk.
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(releaseStoreFilePath!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -41,6 +93,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Sign only when a keystore was supplied (local keystore.properties
+            // or CI secrets). A keyless checkout still configures and builds —
+            // the release apk is just unsigned. See docs/RELEASING_ANDROID.md.
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             // No special debug behavior: FLAG_SECURE, no-logging and all other
