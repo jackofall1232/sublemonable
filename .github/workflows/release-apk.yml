@@ -130,6 +130,7 @@ jobs:
           echo "sha256=$(cut -d' ' -f1 < "$RUNNER_TEMP/dist/SHA256SUMS")" >> "$GITHUB_OUTPUT"
 
       - name: Verify signature & enforce signing-cert continuity
+        id: verify
         if: steps.signing.outputs.signed == 'true'
         env:
           EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
@@ -140,6 +141,7 @@ jobs:
           norm() { printf '%s' "$1" | tr 'A-F' 'a-f' | tr -cd '0-9a-f'; }
           ACTUAL=$("$APKSIGNER" verify --print-certs "$APK" \
             | grep -Eio 'certificate SHA-256 digest: [0-9a-f]+' | head -1 | awk '{print $NF}')
+          echo "cert_sha256=$ACTUAL" >> "$GITHUB_OUTPUT"
           {
             echo "### Signing certificate"
             echo "SHA-256 digest: \`${ACTUAL:-unknown}\`"
@@ -176,16 +178,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
-          NOTES="Sublemonable Android ${TAG}. Verify before installing: \`sha256sum ${{ steps.stage.outputs.apk }}\` should print \`${{ steps.stage.outputs.sha256 }}\`."
-          if ! gh release create "$TAG" \
-                "$RUNNER_TEMP/dist/${{ steps.stage.outputs.apk }}" \
+          APK="${{ steps.stage.outputs.apk }}"
+          {
+            echo "Sublemonable Android ${TAG}."
+            echo ""
+            echo "Verify before installing:"
+            echo "- APK SHA-256: \`${{ steps.stage.outputs.sha256 }}\` (\`sha256sum ${APK}\`)"
+            echo "- Signing certificate SHA-256: \`${{ steps.verify.outputs.cert_sha256 }}\` (\`apksigner verify --print-certs ${APK}\`)"
+          } > "$RUNNER_TEMP/notes.md"
+          if gh release create "$TAG" \
+                "$RUNNER_TEMP/dist/${APK}" \
                 "$RUNNER_TEMP/dist/SHA256SUMS" \
-                --repo "${{ github.repository }}" --title "$TAG" --prerelease --verify-tag --notes "$NOTES"; then
-            echo "Release exists — uploading assets with --clobber."
-            gh release upload "$TAG" \
-              "$RUNNER_TEMP/dist/${{ steps.stage.outputs.apk }}" \
-              "$RUNNER_TEMP/dist/SHA256SUMS" \
-              --repo "${{ github.repository }}" --clobber
+                --repo "${{ github.repository }}" --title "$TAG" --prerelease --verify-tag --notes-file "$RUNNER_TEMP/notes.md"; then
+            echo "Published release $TAG."
+          else
+            echo "::error::Could not create release $TAG. If a release for this tag already exists, its APK + checksum are live download assets — delete it deliberately (gh release delete $TAG) or cut a new tag rather than clobbering live assets in place. If the tag is missing, create and push it first."
+            exit 1
           fi
 
       - name: Upload unsigned APK artifact (no keystore configured)

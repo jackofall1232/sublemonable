@@ -227,11 +227,16 @@ repository** (they are `.gitignore`d). Both mirrors serve whatever you stage int
 the `onion-site/` directory, which is mounted read-only into the server:
 
 ```bash
-# Copy the release APK you want to distribute into the mirror directory
+# Copy the release APK you want to distribute into the mirror directory. Drop any
+# previous APK first — the mirror serves the first *.apk it finds, so a leftover
+# older build keeps shipping.
+rm -f onion-site/*.apk
 cp sublemonable-v1.5.0-beta.apk onion-site/
 
-# Generate a checksum list the mirror serves at /SHA256SUMS
-sha256sum onion-site/*.apk > onion-site/SHA256SUMS
+# Generate a checksum list the mirror serves at /SHA256SUMS. Run it from inside
+# onion-site so the file records basenames — testers download /SHA256SUMS next to
+# the APK and run `sha256sum -c SHA256SUMS`, which needs the basename, not a path.
+( cd onion-site && sha256sum *.apk > SHA256SUMS )
 ```
 
 The download page reacts to what is present:

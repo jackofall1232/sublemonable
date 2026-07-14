@@ -109,7 +109,7 @@ Do this **last** — flipping the pointer before the asset is uploaded 404s test
                                      # the first *.apk it finds (server/cmd/server/onion.go
                                      # findStagedAPK), so a leftover older APK keeps shipping
    cp sublemonable-v1.5.1.apk onion-site/
-   sha256sum onion-site/*.apk > onion-site/SHA256SUMS
+   ( cd onion-site && sha256sum *.apk > SHA256SUMS )   # basenames — so testers' `sha256sum -c SHA256SUMS` matches
    ```
 3. Commit and push — Vercel redeploys and `/download/beta` serves the fixed build.
 
