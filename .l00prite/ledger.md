@@ -854,3 +854,69 @@ Multi-track session (Phase 0/1 sequential, then Tracks A–D). Nothing committed
   same warning and is resolved by re-scanning the contact's new QR (re-add updates the pin). A
   richer "accept new key" flow + a failed-message state are follow-ups, not done here.
 - Still unbuilt in-session (no SDK) — relying on the now-real Android CI job.
+
+## Run 6 — v1.5.1 release-cut: Step-1 verification (2026-07-14)
+
+Release-cut task (verify → package → ship v1.5.1). Ran the Step-1 verification gate against the
+**actual merged code on `main`** (HEAD `9990a9e`), not past-session summaries. `BRIEFING.md` does
+not exist in the checkout (noted; blueprint already recorded this).
+
+### STEP 1 — verification: PASS (all five present as real, merged code)
+1. **Registration** — `MessagingCoordinator.bootstrapLoop()`: `ensureIdentity` → `register`
+   (first-run only, guarded by `api.accountId == null`) → `createSession` → `ws.connect`, on a
+   capped exponential backoff (1s→60s). `ApiClient.accountIdFlow: StateFlow<String?>` updates the
+   Account ID row the instant registration lands. One-time prekeys generated once, reused across
+   register retries.
+2. **Connection I2P→Tor→clearnet + warning + backoff** — `connectivity` StateFlow (boot supervisor
+   + socket); `WsClient` owns socket reconnect; `onAuthExpired()` re-sessions on 401/403.
+   `SettingsScreen` derives transport (TOR / CLEARNET_FALLBACK-with-orange-warning / OFFLINE);
+   clearnet always flagged. Actual routing is real, not cosmetic: `CertificatePinning.buildClient(
+   torEnabled)` attaches `TorIntegration.socksProxy()` (127.0.0.1:9050), pushed live via
+   `SublemonableApp.applyTorSetting()` → `updateClient()`. NUANCE: on Android I2P is an honest stub
+   (no in-process mobile I2P SDK), so the real mobile chain is Tor-over-Orbot → clearnet. Known /
+   documented (V1_5_STATUS, todos "Later"), not a regression.
+3. **Contact QR/scan/copy** — `AddContactScreen` (My-QR, "Copy contact code", in-app scanner behind
+   `SecureCaptureActivity` FLAG_SECURE, paste) + `ContactExchange.parseContactPayload` /
+   `buildContactExchangePayload`. DISCREPANCY vs briefing: briefing says "wired to the dead-drop
+   token spec", but the flow deliberately uses `ContactExchangePayload {version,account_id,
+   identity_key}`, NOT the dead-drop token — the code + ledger explicitly document that a dead-drop
+   token carries no durable identity and would invent a contact protocol nothing can read.
+   Dead-drop-**token** QR remains a separate, still-unbuilt Ghost-mode capability (todos "Later").
+   The contact-add QR that shipped is the correct one; briefing wording does not match reality.
+4. **Orbot "Get Orbot"** — `SettingsScreen` "Get Orbot" (Play) + "…or get Orbot on F-Droid"
+   fallback; `TorIntegration.orbotInstallIntent()` / `orbotFDroidIntent()` / `ORBOT_FDROID_URL`;
+   `torAvailable` re-checked on resume so the toggle un-disables after install.
+5. **identity_key pinning** — resolved decision = **pin the OOB key (TOFU when no key)**, the
+   maintainer-approved "proper fix" (explicitly NOT carry-only). `MainActivity.onAdd` sets
+   `pinnedIdentityKeyBase64`; `sendText` refuses + `flagIdentityMismatch()` (WARNING badge, pin
+   KEPT) when the relay bundle's key ≠ pin. Matches the Run-5 addendum exactly. Merged (part of #14
+   + its addendum).
+
+### STEP 2 — version bump: DONE for app/packages, website pointer deliberately NOT flipped
+- 1.5.1 across Android (`versionName 1.5.1` / `versionCode 3`), root/website/web/desktop
+  package.json, tauri.conf.json, desktop Cargo.toml, both iOS Info.plists (all via #15).
+- `website/src/lib/links.ts` `ANDROID_BETA_VERSION`/`ANDROID_BETA_SHA256` still `v1.5.0-beta` /
+  old hash — INTENTIONAL: the pointer must trail the signed-APK upload or `/download/beta` 404s.
+  `website/DEPLOY.md` has two example `v1.5.0-beta` mentions (runbook text) that also trail.
+
+### STEPS 3–5 — BLOCKED in this environment (not a workaround-able gap; the intended custody boundary)
+This is a cloud/web session. Verified absent here: `/root/sublemonable-release.jks` (and backup),
+any Android SDK (`ANDROID_HOME` unset; no `apksigner`/`aapt2`/`sdkmanager`), any Tor client, any
+staged `onion-site/*.apk` (gitignored, box-only). `onion-site/SHA256SUMS` still lists
+`sublemonable-v1.5.0-beta.apk`.
+- **Step 3 (build & sign):** cannot run — no keystore, no SDK. Did NOT generate a replacement key
+  (per instruction). Signing must happen on the relay box.
+- **Step 4 (4 surfaces):** GitHub release needs the signed APK (unbuildable here); public + secret
+  Tor mirrors live on the box filesystem over Tor (no access); clearnet Vercel pointer flip is
+  editable here but must trail the APK.
+- **Step 5 (verify live):** cannot fetch the `.onion` mirrors (no Tor); nothing new to verify on
+  clearnet until the release is cut.
+The on-box path already exists: `scripts/release-android-on-box.sh` (merged #17) does build → sign
+(continuity-checked) → verify → stage both mirrors → publish the GitHub release in one command. A
+cloud check-in is armed to auto-flip `links.ts` + `onion-site/SHA256SUMS` on this branch the moment
+the `v1.5.1` GitHub release appears, with an independent checksum recompute.
+
+### Net
+Step-1 gate PASSED — no documented-but-unshipped fix; v1.5.0's failure mode is not repeated. The
+release cannot be *cut* from this environment by design; it must be run on the relay box. Nothing
+was built, signed, or shipped this run.
