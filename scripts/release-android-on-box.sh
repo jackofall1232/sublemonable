@@ -92,7 +92,7 @@ read -rsp "Key password (enter to reuse keystore password): " KEY_PASS; echo
 KEY_PASS="${KEY_PASS:-$STORE_PASS}"
 
 # keytool prints "SHA256: AA:BB:..." — normalize and compare to the pinned digest.
-KS_CERT="$(keytool -list -v -keystore "$KEYSTORE_FILE" -alias "$KEY_ALIAS" -storepass "$STORE_PASS" 2>/dev/null \
+KS_CERT="$(LC_ALL=C keytool -list -v -keystore "$KEYSTORE_FILE" -alias "$KEY_ALIAS" -storepass "$STORE_PASS" 2>/dev/null \
   | grep -m1 'SHA256:' | awk '{print $2}')" || true
 [ -n "$KS_CERT" ] || fail "could not read the certificate from the keystore (wrong password or alias?)"
 if [ "$(norm_hex "$KS_CERT")" != "$(norm_hex "$EXPECTED_CERT_SHA256")" ]; then
@@ -117,7 +117,7 @@ APK_SRC="apps/android/app/build/outputs/apk/release/app-release.apk"
 find_buildtool() { # newest build-tools copy of $1, or $1 from PATH
   local sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" hit=""
   if [ -n "$sdk" ]; then
-    hit="$(ls -1 "$sdk"/build-tools/*/"$1" 2>/dev/null | sort -V | tail -1)"
+    hit="$(ls -1 "$sdk"/build-tools/*/"$1" 2>/dev/null | sort -V | tail -1 || true)"
   fi
   [ -n "$hit" ] && { echo "$hit"; return; }
   command -v "$1" || true
@@ -125,7 +125,9 @@ find_buildtool() { # newest build-tools copy of $1, or $1 from PATH
 APKSIGNER="$(find_buildtool apksigner)"
 [ -n "$APKSIGNER" ] || fail "apksigner not found (looked in \$ANDROID_HOME/build-tools and PATH)"
 "$APKSIGNER" verify --print-certs "$APK_SRC" >/dev/null || fail "apksigner verify FAILED on the built APK"
-APK_CERT="$("$APKSIGNER" verify --print-certs "$APK_SRC" | grep -Eio 'certificate SHA-256 digest: [0-9a-f]+' | head -1 | awk '{print $NF}')"
+APK_CERT="$("$APKSIGNER" verify --print-certs "$APK_SRC" 2>/dev/null \
+  | grep -Eio 'certificate SHA-256 digest: [0-9a-f]+' | head -1 | awk '{print $NF}')" || true
+[ -n "$APK_CERT" ] || fail "could not extract the certificate SHA-256 digest from the built APK"
 [ "$(norm_hex "$APK_CERT")" = "$(norm_hex "$EXPECTED_CERT_SHA256")" ] \
   || fail "built APK signed by unexpected cert ($APK_CERT) — refusing to stage or publish"
 note "APK signature verified; signer cert matches the release key."
@@ -164,6 +166,7 @@ Also available from the Tor onion mirror (same binary, same checksum)."
 
 if [ -n "${GITHUB_TOKEN:-}" ]; then
   command -v curl >/dev/null || fail "curl not on PATH"
+  command -v python3 >/dev/null || fail "python3 not on PATH (needed for JSON encoding/parsing)"
   API="https://api.github.com/repos/jackofall1232/sublemonable"
   AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json")
   # Never clobber a live release's assets in place — same rule as the CI workflow.
