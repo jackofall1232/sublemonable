@@ -21,7 +21,9 @@
 #   ANDROID_KEY_ALIAS          key alias
 #   ANDROID_KEY_PASSWORD       key password
 # Optional:
-#   RELAY_ONION_ADDRESS        baked into the build if your app targets a relay onion
+#   ANDROID_SIGNING_CERT_SHA256  expected signing-cert SHA-256; when set, publishing
+#                                aborts unless the built APK's cert matches it
+#   RELAY_ONION_ADDRESS          baked into the build if your app targets a relay onion
 
 name: Release APK
 
@@ -127,19 +129,33 @@ jobs:
           echo "apk=$OUT" >> "$GITHUB_OUTPUT"
           echo "sha256=$(cut -d' ' -f1 < "$RUNNER_TEMP/dist/SHA256SUMS")" >> "$GITHUB_OUTPUT"
 
-      - name: Verify signature & print signing certificate
+      - name: Verify signature & enforce signing-cert continuity
         if: steps.signing.outputs.signed == 'true'
+        env:
+          EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
         run: |
           APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
-          "$APKSIGNER" verify --print-certs "$RUNNER_TEMP/dist/${{ steps.stage.outputs.apk }}"
+          APK="$RUNNER_TEMP/dist/${{ steps.stage.outputs.apk }}"
+          "$APKSIGNER" verify --print-certs "$APK"
+          norm() { printf '%s' "$1" | tr 'A-F' 'a-f' | tr -cd '0-9a-f'; }
+          ACTUAL=$("$APKSIGNER" verify --print-certs "$APK" \
+            | grep -Eio 'certificate SHA-256 digest: [0-9a-f]+' | head -1 | awk '{print $NF}')
           {
             echo "### Signing certificate"
-            echo '```'
-            "$APKSIGNER" verify --print-certs "$RUNNER_TEMP/dist/${{ steps.stage.outputs.apk }}" || true
-            echo '```'
-            echo "Confirm this SHA-256 cert digest matches the one that signed the previous release,"
-            echo "or existing installs cannot update over the top."
+            echo "SHA-256 digest: \`${ACTUAL:-unknown}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$EXPECTED_CERT_SHA256" ]; then
+            # A signature change breaks updates for every existing install (forces an
+            # uninstall, wiping local identity + history). Refuse to publish a build
+            # signed by anything other than the pinned key.
+            if [ "$(norm "$ACTUAL")" != "$(norm "$EXPECTED_CERT_SHA256")" ]; then
+              echo "::error::Signing cert ($ACTUAL) does not match pinned ANDROID_SIGNING_CERT_SHA256 — refusing to publish a release signed with a different key."
+              exit 1
+            fi
+            echo "Signing certificate matches the pinned continuity value."
+          else
+            echo "::warning::ANDROID_SIGNING_CERT_SHA256 not set — signing-key continuity is NOT enforced. Pin it to the previous release's certificate SHA-256 digest to block accidental key changes."
+          fi
 
       - name: Emit website pointer values (signed builds)
         if: steps.signing.outputs.signed == 'true'
@@ -164,7 +180,7 @@ jobs:
           if ! gh release create "$TAG" \
                 "$RUNNER_TEMP/dist/${{ steps.stage.outputs.apk }}" \
                 "$RUNNER_TEMP/dist/SHA256SUMS" \
-                --repo "${{ github.repository }}" --title "$TAG" --prerelease --notes "$NOTES"; then
+                --repo "${{ github.repository }}" --title "$TAG" --prerelease --verify-tag --notes "$NOTES"; then
             echo "Release exists — uploading assets with --clobber."
             gh release upload "$TAG" \
               "$RUNNER_TEMP/dist/${{ steps.stage.outputs.apk }}" \

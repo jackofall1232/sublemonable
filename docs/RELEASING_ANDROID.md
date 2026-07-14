@@ -73,6 +73,7 @@ unreviewed):
 | `ANDROID_KEYSTORE_PASSWORD` | keystore password |
 | `ANDROID_KEY_ALIAS` | key alias |
 | `ANDROID_KEY_PASSWORD` | key password |
+| `ANDROID_SIGNING_CERT_SHA256` _(optional)_ | The previous release's signing-cert SHA-256 (the digest from the pre-flight check). When set, the workflow **aborts before publishing** if the built APK's signing cert differs — a guardrail against an accidental key change slipping through the environment approval. |
 
 Then push a tag (`git tag v1.5.1 && git push origin v1.5.1`) or run the workflow via
 **Actions → Release APK → Run workflow**. The workflow builds + signs, verifies the signature, prints
@@ -104,6 +105,9 @@ Do this **last** — flipping the pointer before the asset is uploaded 404s test
 2. Stage the same binary into the Tor mirror so both surfaces serve an identical, matching-checksum
    file (see [`SELF_HOSTING.md`](SELF_HOSTING.md#stage-the-apk-required-for-the-mirrors-to-show-a-download-link)):
    ```bash
+   rm -f onion-site/*.apk            # drop the previous build FIRST: the mirror serves
+                                     # the first *.apk it finds (server/cmd/server/onion.go
+                                     # findStagedAPK), so a leftover older APK keeps shipping
    cp sublemonable-v1.5.1.apk onion-site/
    sha256sum onion-site/*.apk > onion-site/SHA256SUMS
    ```
