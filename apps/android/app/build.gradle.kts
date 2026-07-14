@@ -16,8 +16,8 @@ android {
         applicationId = "com.sublemonable.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.5.0-beta"
+        versionCode = 3
+        versionName = "1.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
