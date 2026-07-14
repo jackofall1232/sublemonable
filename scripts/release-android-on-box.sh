@@ -112,7 +112,9 @@ read -rsp "Key password (enter to reuse keystore password): " KEY_PASS; echo
 KEY_PASS="${KEY_PASS:-$STORE_PASS}"
 
 # keytool prints "SHA256: AA:BB:..." — normalize and compare to the pinned digest.
-KS_CERT="$(LC_ALL=C keytool -list -v -keystore "$KEYSTORE_FILE" -alias "$KEY_ALIAS" -storepass "$STORE_PASS" 2>/dev/null \
+# -storepass:env keeps the password out of argv (world-readable via ps//proc on
+# a shared box); LC_ALL=C keeps the SHA256 label parseable on any locale.
+KS_CERT="$(KT_STOREPASS="$STORE_PASS" LC_ALL=C keytool -list -v -keystore "$KEYSTORE_FILE" -alias "$KEY_ALIAS" -storepass:env KT_STOREPASS 2>/dev/null \
   | grep -m1 'SHA256:' | awk '{print $2}')" || true
 [ -n "$KS_CERT" ] || fail "could not read the certificate from the keystore (wrong password or alias?)"
 if [ "$(norm_hex "$KS_CERT")" != "$(norm_hex "$EXPECTED_CERT_SHA256")" ]; then
@@ -154,9 +156,18 @@ note "APK signature verified; signer cert matches the release key."
 
 AAPT2="$(find_buildtool aapt2)"
 if [ -n "$AAPT2" ]; then
-  BADGING="$("$AAPT2" dump badging "$APK_SRC" | head -1)"
-  echo "$BADGING" | grep -q "versionCode='$VERSION_CODE'" || fail "artifact versionCode does not match $VERSION_CODE: $BADGING"
-  echo "$BADGING" | grep -q "versionName='$VERSION_NAME'" || fail "artifact versionName does not match $VERSION_NAME: $BADGING"
+  # Capture the full output before selecting from it: `aapt2 | head -1` would
+  # SIGPIPE aapt2 under pipefail once head exits, killing a valid release.
+  BADGING="$("$AAPT2" dump badging "$APK_SRC" 2>/dev/null || true)"
+  [ -n "$BADGING" ] || fail "aapt2 dump badging produced no output for $APK_SRC"
+  case "$BADGING" in
+    *"versionCode='$VERSION_CODE'"*) : ;;
+    *) fail "artifact versionCode does not match $VERSION_CODE: ${BADGING%%$'\n'*}" ;;
+  esac
+  case "$BADGING" in
+    *"versionName='$VERSION_NAME'"*) : ;;
+    *) fail "artifact versionName does not match $VERSION_NAME: ${BADGING%%$'\n'*}" ;;
+  esac
   note "Artifact carries versionCode $VERSION_CODE / versionName $VERSION_NAME."
 else
   note "aapt2 not found — skipping embedded-version check (gradle-side assert already passed)."
@@ -193,6 +204,16 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
   if curl -fsS "${AUTH[@]}" "$API/releases/tags/$RELEASE_TAG" >/dev/null 2>&1; then
     fail "a release for $RELEASE_TAG already exists — delete it deliberately or cut a new tag"
   fi
+  # If the tag already exists on origin it must point at the commit we built:
+  # the Create Release API IGNORES target_commitish for an existing tag, so a
+  # stale tag would publish this signed APK against different source. This is
+  # the script's equivalent of the CI workflow's `gh release create --verify-tag`.
+  TAG_LINES="$(git ls-remote --tags origin 2>/dev/null || true)"
+  EXISTING_TAG_SHA="$(printf '%s\n' "$TAG_LINES" | awk -v p="refs/tags/$RELEASE_TAG" -v t="refs/tags/$RELEASE_TAG^{}" \
+    '$2==p{plain=$1} $2==t{peeled=$1} END{print (peeled!=""?peeled:plain)}')"
+  if [ -n "$EXISTING_TAG_SHA" ] && [ "$EXISTING_TAG_SHA" != "$HEAD_SHA" ]; then
+    fail "tag $RELEASE_TAG already exists on origin at ${EXISTING_TAG_SHA:0:12} but this build is ${HEAD_SHA:0:12} — retag deliberately before publishing"
+  fi
   note "Creating GitHub prerelease $RELEASE_TAG ..."
   # Tag the exact commit that was built (verified == origin/main above), not
   # the moving "main" ref — main could advance between build and publish.
@@ -224,9 +245,12 @@ fi
 
 cat <<EOF
 
-DONE. Values the website needs (website/src/lib/links.ts):
+DONE — but the public website does NOT update itself: /download/beta reads
+hard-coded values from website/src/lib/links.ts. Once the release is live,
+flip them in git (a release-watching Claude session may push this for you —
+verify the commit actually landed before assuming so):
   ANDROID_BETA_VERSION = "$RELEASE_TAG"
   ANDROID_BETA_SHA256  = "$APK_SHA256"
-The cloud session watches for the published release and flips the website
-pointer automatically — no further action needed here once the release is live.
+plus the matching line in onion-site/SHA256SUMS, then merge to main so
+Vercel redeploys /download/beta.
 EOF
