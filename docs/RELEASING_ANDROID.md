@@ -36,6 +36,12 @@ If those two digests differ, stop — signing 1.5.1 with a different key breaks 
 
 ## Option A — build & sign locally (recommended, key never leaves your machine)
 
+> **One command on the relay box:** [`scripts/release-android-on-box.sh`](../scripts/release-android-on-box.sh)
+> runs this entire option end to end — pre-flight cert-continuity check, signed build
+> (passwords prompted, never written to disk), apksigner + version verification, Tor-mirror
+> staging, and the GitHub Release (via `GITHUB_TOKEN`, or printed manual steps). Everything
+> below documents what it does, and how to do it by hand.
+
 `app/build.gradle.kts` picks up signing material from a gitignored `keystore.properties`:
 
 ```bash
