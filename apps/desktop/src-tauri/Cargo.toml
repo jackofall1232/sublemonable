@@ -5,7 +5,7 @@
 
 [package]
 name = "sublemonable-desktop"
-version = "1.0.0"
+version = "1.5.1"
 edition = "2021"
 description = "Sublemonable desktop app — Linux"
 license = "AGPL-3.0-only"

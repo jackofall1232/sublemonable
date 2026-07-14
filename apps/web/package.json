@@ -1,6 +1,6 @@
 {
   "name": "@sublemonable/web",
-  "version": "1.0.0",
+  "version": "1.5.1",
   "private": true,
   "description": "Sublemonable browser client — E2EE ephemeral messaging PWA",
   "license": "AGPL-3.0-only",
