@@ -7,12 +7,13 @@ was last uploaded as a GitHub Release asset — until a signed `v1.5.1` APK is b
 the download link keeps handing out the pre-fix `v1.5.0-beta` build. This is the runbook that closes
 that gap.
 
-## The one thing this environment cannot do
+## Signing-key custody
 
-The release **signing key must never exist in an ephemeral/CI environment**: it is the app's trust
-anchor, and whoever holds it can impersonate the app to every install. So the signed, distributable
-APK is produced **on hardware you control** — either your machine (below) or CI with secrets you
-deliberately opt into. Two hard rules follow:
+By default the release **signing key never exists in this session or in CI**: it is the app's trust
+anchor, and whoever holds it can impersonate the app to every install. Keep it on hardware you
+control and sign there (Option A). CI signing is possible **only if you deliberately opt in** —
+placing the key in GitHub Secrets behind a protected environment (Option B) — a custody tradeoff you
+choose, not the default. Either way, two hard rules follow:
 
 - **Reuse the same keystore that signed the previous release.** Android refuses to install an update
   whose signature differs from the installed app (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`); a fresh key
@@ -68,7 +69,7 @@ unreviewed):
 
 | Secret | Value |
 | --- | --- |
-| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 release.jks` |
+| `ANDROID_KEYSTORE_BASE64` | `base64 < release.jks \| tr -d '\n'` (portable; GNU `base64 -w0` also works) |
 | `ANDROID_KEYSTORE_PASSWORD` | keystore password |
 | `ANDROID_KEY_ALIAS` | key alias |
 | `ANDROID_KEY_PASSWORD` | key password |

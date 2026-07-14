@@ -25,8 +25,27 @@ val keystoreProperties = Properties().apply {
 fun signingParam(propKey: String, envKey: String): String? =
     keystoreProperties.getProperty(propKey)
         ?: providers.environmentVariable(envKey).orNull
-val releaseStoreFilePath: String? = signingParam("storeFile", "ANDROID_KEYSTORE_FILE")
-val hasReleaseSigning: Boolean = !releaseStoreFilePath.isNullOrBlank()
+val releaseStoreFilePath = signingParam("storeFile", "ANDROID_KEYSTORE_FILE")
+val releaseStorePassword = signingParam("storePassword", "ANDROID_KEYSTORE_PASSWORD")
+val releaseKeyAlias = signingParam("keyAlias", "ANDROID_KEY_ALIAS")
+val releaseKeyPassword = signingParam("keyPassword", "ANDROID_KEY_PASSWORD")
+val releaseSigningParams = listOf(
+    releaseStoreFilePath, releaseStorePassword, releaseKeyAlias, releaseKeyPassword,
+)
+// Sign only when ALL four values are present — gating on the whole set, not just
+// storeFile: a keystore path with a missing password/alias would otherwise reach
+// the signing config as nulls and fail the build obscurely.
+val hasReleaseSigning = releaseSigningParams.all { !it.isNullOrBlank() }
+// A partial config is almost always a mistake — fail loudly rather than silently
+// falling back to an unsigned build the operator believed was signed.
+if (!hasReleaseSigning && releaseSigningParams.any { !it.isNullOrBlank() }) {
+    throw GradleException(
+        "Incomplete release signing config: provide all of storeFile, storePassword, keyAlias, " +
+            "keyPassword (via keystore.properties or the ANDROID_KEYSTORE_FILE / " +
+            "ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD env vars), or none. " +
+            "See docs/RELEASING_ANDROID.md.",
+    )
+}
 
 android {
     namespace = "com.sublemonable.app"
@@ -54,14 +73,14 @@ android {
     }
 
     signingConfigs {
-        // Declared only when a keystore was actually provided; otherwise no
+        // Declared only when a full keystore config was provided; otherwise no
         // signing config exists and assembleRelease yields an unsigned apk.
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = rootProject.file(releaseStoreFilePath!!)
-                storePassword = signingParam("storePassword", "ANDROID_KEYSTORE_PASSWORD")
-                keyAlias = signingParam("keyAlias", "ANDROID_KEY_ALIAS")
-                keyPassword = signingParam("keyPassword", "ANDROID_KEY_PASSWORD")
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }

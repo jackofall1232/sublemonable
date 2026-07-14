@@ -16,7 +16,7 @@
 # unsigned artifact locally. See docs/RELEASING_ANDROID.md.
 #
 # Required secrets (only for the signed path):
-#   ANDROID_KEYSTORE_BASE64    base64 of your release .jks  (`base64 -w0 release.jks`)
+#   ANDROID_KEYSTORE_BASE64    base64 of your release .jks  (base64 < release.jks | tr -d '\n')
 #   ANDROID_KEYSTORE_PASSWORD  keystore password
 #   ANDROID_KEY_ALIAS          key alias
 #   ANDROID_KEY_PASSWORD       key password
@@ -32,7 +32,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build and publish (e.g. v1.5.1). Built from the selected ref."
+        description: "Existing release tag to build and publish (e.g. v1.5.1). Create and push the tag first — the run checks it out."
         required: true
 
 permissions:
@@ -44,7 +44,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: android-release # gate secrets behind a protected environment
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the exact ref being released
+        uses: actions/checkout@v4
+        with:
+          # Build precisely the tag we publish. On workflow_dispatch this is the
+          # input tag; on a tag push it is the pushed tag. Without an explicit
+          # ref, a dispatched run would build the default branch while publishing
+          # a Release named for a different tag — a release-integrity bug.
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Resolve release tag
         id: meta
@@ -123,7 +130,7 @@ jobs:
       - name: Verify signature & print signing certificate
         if: steps.signing.outputs.signed == 'true'
         run: |
-          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/34.0.0/apksigner)"
+          APKSIGNER="$ANDROID_HOME/build-tools/34.0.0/apksigner"
           "$APKSIGNER" verify --print-certs "$RUNNER_TEMP/dist/${{ steps.stage.outputs.apk }}"
           {
             echo "### Signing certificate"
