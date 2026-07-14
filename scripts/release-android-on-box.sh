@@ -56,8 +56,28 @@ cd "$REPO_ROOT"
 GRADLE_FILE="apps/android/app/build.gradle.kts"
 [ -f "$GRADLE_FILE" ] && [ -x apps/android/gradlew ] || fail "missing $GRADLE_FILE or gradle wrapper — wrong directory?"
 
-VERSION_NAME="$(grep -oP 'versionName\s*=\s*"\K[^"]+' "$GRADLE_FILE")" || fail "could not read versionName from $GRADLE_FILE"
-VERSION_CODE="$(grep -oP 'versionCode\s*=\s*\K[0-9]+' "$GRADLE_FILE")" || fail "could not read versionCode from $GRADLE_FILE"
+# ── Release integrity: build exactly what the release will tag ───────────────
+# The APK is built from this checkout, but the GitHub release tags a commit —
+# if they differ, the published tag would not correspond to the shipped binary.
+# Gitignored operational files (.env, keystores, staged APKs) never appear in
+# `git status --porcelain`, so the box's normal state does not trip this.
+# onion-site/ (mirror staging) and scripts/ (this script, when fetched ahead of
+# its merge) are excluded because neither is compiled into the APK.
+git fetch origin main --quiet || note "WARNING: could not fetch origin/main — comparing against the last-fetched ref"
+HEAD_SHA="$(git rev-parse HEAD)"
+if [ "$HEAD_SHA" != "$(git rev-parse origin/main)" ]; then
+  [ "${ALLOW_NON_MAIN:-}" = "1" ] || fail "HEAD is not origin/main — run 'git pull origin main' first (or set ALLOW_NON_MAIN=1 for a deliberate exception)"
+fi
+DIRTY="$(git status --porcelain -- . ':!onion-site' ':!scripts' || true)"
+if [ -n "$DIRTY" ]; then
+  echo "$DIRTY" >&2
+  [ "${ALLOW_DIRTY:-}" = "1" ] || fail "checkout has local changes to tracked files (above) — they would ship code the tag does not contain. Commit/stash them, or set ALLOW_DIRTY=1 for a deliberate exception."
+fi
+
+VERSION_NAME="$(sed -n 's/.*versionName *= *"\([^"]*\)".*/\1/p' "$GRADLE_FILE" | head -1)"
+[ -n "$VERSION_NAME" ] || fail "could not read versionName from $GRADLE_FILE"
+VERSION_CODE="$(sed -n 's/.*versionCode *= *\([0-9][0-9]*\).*/\1/p' "$GRADLE_FILE" | head -1)"
+[ -n "$VERSION_CODE" ] || fail "could not read versionCode from $GRADLE_FILE"
 RELEASE_TAG="${RELEASE_TAG:-v$VERSION_NAME}"
 
 # Same rule the CI workflow enforces: the tag must be v<versionName> or
@@ -71,7 +91,7 @@ note "Releasing $RELEASE_TAG (versionName $VERSION_NAME, versionCode $VERSION_CO
 
 # ── Relay onion address (baked into the build; NEVER committed/published) ────
 if [ -z "${RELAY_ONION_ADDRESS:-}" ] && [ -f .env ]; then
-  RELAY_ONION_ADDRESS="$(grep -oP '^RELAY_ONION_ADDRESS=\K.*' .env | tr -d '"' || true)"
+  RELAY_ONION_ADDRESS="$(sed -n 's/^RELAY_ONION_ADDRESS=//p' .env | head -1 | tr -d '"')"
 fi
 [ -n "${RELAY_ONION_ADDRESS:-}" ] || fail "RELAY_ONION_ADDRESS is empty and not found in .env — the previous beta shipped with it baked in; building without it would regress Tor-first transport. Export it or fix .env."
 export RELAY_ONION_ADDRESS
@@ -174,9 +194,11 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
     fail "a release for $RELEASE_TAG already exists — delete it deliberately or cut a new tag"
   fi
   note "Creating GitHub prerelease $RELEASE_TAG ..."
+  # Tag the exact commit that was built (verified == origin/main above), not
+  # the moving "main" ref — main could advance between build and publish.
   RELEASE_JSON="$(curl -fsS "${AUTH[@]}" -X POST "$API/releases" \
-    -d "$(printf '{"tag_name":"%s","target_commitish":"main","name":"%s","prerelease":true,"body":%s}' \
-          "$RELEASE_TAG" "$RELEASE_TAG" "$(printf '%s' "$NOTES" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")")"
+    -d "$(printf '{"tag_name":"%s","target_commitish":"%s","name":"%s","prerelease":true,"body":%s}' \
+          "$RELEASE_TAG" "$HEAD_SHA" "$RELEASE_TAG" "$(printf '%s' "$NOTES" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")")"
   UPLOAD_URL="$(printf '%s' "$RELEASE_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["upload_url"].split("{")[0])')"
   for asset in "$APK_NAME" onion-site/SHA256SUMS; do
     note "Uploading $(basename "$asset") ..."
@@ -189,7 +211,8 @@ else
 
 ── No GITHUB_TOKEN set — publish manually (same as last time) ─────────────────
 1. Open https://github.com/jackofall1232/sublemonable/releases/new
-2. Tag: $RELEASE_TAG (target: main) · Title: $RELEASE_TAG · check "pre-release"
+2. Tag: $RELEASE_TAG · Title: $RELEASE_TAG · check "pre-release"
+   Target: commit $HEAD_SHA (use "Recent Commits" if main has moved since this build)
 3. Upload BOTH files from $REPO_ROOT:
      $APK_NAME
      onion-site/SHA256SUMS
