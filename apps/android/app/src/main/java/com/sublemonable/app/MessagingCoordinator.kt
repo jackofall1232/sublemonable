@@ -6,6 +6,7 @@
 package com.sublemonable.app
 
 import android.content.Context
+import android.util.Log
 import com.sublemonable.app.crypto.SignalProtocolManager
 import com.sublemonable.app.data.Conversation
 import com.sublemonable.app.data.ConversationRepository
@@ -16,6 +17,7 @@ import com.sublemonable.app.data.MessageState
 import com.sublemonable.app.net.ApiClient
 import com.sublemonable.app.net.WsClient
 import com.sublemonable.app.notifications.MessagingNotifications
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -43,6 +45,17 @@ import kotlin.math.min
  * to log by construction. Instead of failing dead, the boot sequence retries
  * on a capped backoff so a transient outage at unlock time can't strand the
  * account unregistered and offline forever (see [start]).
+ *
+ * The ONE exception to the no-logging rule is boot-stage transport
+ * diagnostics in [bootstrapLoop]: fixed stage/milestone markers (e.g.
+ * "firing POST /api/v1/register", "session minted") and the transport
+ * exception class/message on failure (connect errors, HTTP status codes,
+ * certificate-pin mismatches). All of these strings are compile-time
+ * constants or exception metadata — no message content, keys, tokens,
+ * account ids, or envelope fields ever flow through them, so nothing
+ * sensitive can leak into logcat. Without it, a certificate-pinning failure
+ * or a dead relay is indistinguishable from airplane mode — the app retries
+ * forever with no signal anywhere, client or server.
  */
 class MessagingCoordinator(
     private val appContext: Context,
@@ -128,10 +141,14 @@ class MessagingCoordinator(
         var registration: (suspend () -> Unit)? = null
         var attempt = 0
         while (coroutineContext.isActive && _linking.value) {
+            // Boot-stage marker for the diagnostic log in onFailure below.
+            // Stage names only — never data.
+            var stage = "ensure-identity"
             val ok = runCatching {
                 signal.ensureIdentity()
                 if (api.accountId == null) {
                     if (registration == null) {
+                        stage = "generate-prekeys"
                         val signedPreKey = signal.generateSignedPreKey()
                         val oneTimePreKeys = signal.generateOneTimePreKeys()
                         registration = suspend {
@@ -151,13 +168,44 @@ class MessagingCoordinator(
                     // never stored and a retry mints a second, orphaned account
                     // (public keys only). The client-side null-guard +
                     // single-flight prevents the common case, not this window.
+                    stage = "register"
+                    Log.w(TAG, "boot[$attempt]: firing POST /api/v1/register")
                     registration?.invoke()
+                    Log.w(TAG, "boot[$attempt]: registration accepted by server")
                 }
-                api.createSession(signal::signLoginChallenge)
-                val token = api.accessToken ?: error("no access token issued")
-                ws.connect(token)
+                stage = "create-session"
+                val tokens = api.createSession(signal::signLoginChallenge)
+                stage = "ws-connect"
+                // Use the freshly-minted token directly rather than reading it
+                // back through api.accessToken — that getter decrypts from
+                // EncryptedSharedPreferences (Android Keystore) on every call,
+                // and the return value is already non-null.
+                ws.connect(tokens.accessToken)
+            }.onFailure { e ->
+                // A cancelled boot (normal teardown via stop()/logout) surfaces
+                // here as CancellationException; rethrow it so structured
+                // cancellation propagates and we don't log a false "failed"
+                // line for an expected shutdown.
+                if (e is CancellationException) throw e
+                // Transport diagnostics only. An SSLPeerUnverifiedException
+                // here means certificate pinning rejected the served leaf —
+                // OkHttp's message lists the served SPKI hashes next to the
+                // pinned ones, which is exactly what's needed to diagnose a
+                // pin rotation in the field.
+                Log.w(
+                    TAG,
+                    "boot[$attempt]: failed at stage=$stage: " +
+                        "${e.javaClass.name}: ${e.message}",
+                )
             }.isSuccess
             if (ok) {
+                // ws.connect() only enqueues the socket open; the real
+                // CONNECTED/DISCONNECTED transition (and any /ws handshake
+                // failure) is delivered asynchronously via ws.connectionState,
+                // which drives the UI connectivity badge — NOT observed here.
+                // So this marks the boot chain reaching a live session and
+                // handing the socket off, not a confirmed-open socket.
+                Log.w(TAG, "boot[$attempt]: session minted, socket handshake handed off")
                 // Reaching a live socket IS success. Signed-prekey rotation is
                 // best-effort and must NOT fail the boot — a failed upload here
                 // would otherwise tear down the healthy socket on the next
@@ -355,6 +403,9 @@ class MessagingCoordinator(
     }
 
     private companion object {
+        /** Logcat tag for boot-stage transport diagnostics — see class kdoc. */
+        const val TAG = "SublemonableBoot"
+
         const val BASE_BACKOFF_MS = 1_000L
         const val MAX_BACKOFF_MS = 60_000L
         const val MAX_BACKOFF_SHIFT = 6

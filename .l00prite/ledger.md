@@ -1056,3 +1056,134 @@ in a browser).
 Verify `https://sublemonable.com/download/beta` shows `v1.5.2` and
 `dae42f25c5baeddb1ebd455e8d9358a862539d6046f50a09ec9ef29fc7aa8f32` from a host with normal
 internet egress (a browser, or a session without this sandbox's proxy allowlist restriction).
+
+## Run 10 — Android registration never reaches server: trace + diagnostics (2026-07-15)
+
+Branch: `claude/android-registration-tracing-2b7du2` → PR #19.
+Scope (strict): confirm and fix WHY first-run registration never reaches the
+server container. Server-side already ruled out by the operator (docker logs on
+`sublemonable-server-1` show ZERO incoming requests during device registration
+attempts; server healthy). Explicitly OUT of scope: I2P/Tor transport
+implementation (flagged in todos.md instead).
+
+### CONFIRMED (evidence in-hand this session)
+
+- **The registration request is constructed and fired unconditionally.** Traced
+  the full path: unlock → `MainActivity` `LaunchedEffect(unlocked){ coordinator.start() }`
+  → `MessagingCoordinator.bootstrapLoop()` → `api.register()` (OkHttp `enqueue`,
+  `ApiClient.execute`). There is NO transport-readiness gate: the loop does not
+  wait on any Tor/I2P "ready" state before firing HTTP. (Task item 2 → answered:
+  no such gate exists.)
+- **The failure was invisible by construction.** The entire boot chain is wrapped
+  in `runCatching {}` with a deliberate no-logging privacy policy, AND
+  `proguard-rules.pro` stripped EVERY `android.util.Log` call in release via
+  `-assumenosideeffects`. So in the release build under test, a pin failure, a
+  dead relay, a TLS mismatch, and airplane mode were all indistinguishable — no
+  client log, no server contact, UI stuck on "Connecting…" forever. This is the
+  confirmed root cause of the *invisibility*, not (yet) of the *failure itself*.
+- **The client targets the correct endpoint.** `API_BASE_URL =
+  https://relay.sublemonable.com` (implicit :443). This is CORRECT per the
+  documented architecture: Caddy terminates TLS on host :443 and reverse-proxies
+  to the Go server on :8443. The client is NOT supposed to dial :8443 directly.
+  "Server confirmed live on 0.0.0.0:8443" only validates the LAST hop
+  (Caddy→server); the untested hop is device→:443→Caddy. (Task item 4 → answered:
+  URL/port are right; :8443 is an internal port, not the client target.)
+- **A pin failure would produce EXACTLY the observed symptom.** OkHttp checks the
+  `CertificatePinner` after the TLS handshake completes but before sending any
+  HTTP bytes. So on a pin mismatch: device completes handshake with Caddy →
+  OkHttp throws `SSLPeerUnverifiedException` and aborts → Caddy proxies nothing →
+  server logs stay empty. Fully consistent with the report. (Task item 3 →
+  mechanism confirmed; live match NOT confirmed, see below.)
+- **Egress from THIS sandbox to `relay.sublemonable.com:443` is BLOCKED.**
+  Re-verified: `openssl s_client … -proxy <agentproxy>` returns
+  `HTTP CONNECT failed, reason= 403 Forbidden`, "no peer certificate available".
+  DNS resolves `relay.sublemonable.com → 178.104.19.240` (matches Run-2 ledger).
+- **No Caddy config or cert artifacts are committed to the repo.** `find` for
+  `*caddy*`, `*.pem/*.crt` → only client pin sources + a `Caddyfile` *snippet* in
+  `docs/SELF_HOSTING.md`. `reuse_private_keys` appears ONLY in that doc snippet;
+  it has never been verified against the live box (consistent with the task's
+  note that the ledger has no such record).
+
+### NOT CONFIRMED — requires Hetzner box access this sandbox does not have
+
+The three confirmation steps in the task all require running ON the box (egress
+here is blocked, and there is no SSH access to the box from this session). I did
+NOT fabricate results for any of them. They must be run by the operator:
+
+1. **Live SPKI vs pinned hash** — could not run `openssl s_client` against the
+   live host. UNKNOWN whether the served leaf SPKI equals
+   `TZbasNP1niaVV0fEtpn2QbjY1QiIS8R7w4zhaU5Yw3U=` (or backup
+   `BoqfuAlHFGnQJiL9nv7n7lAnRMixTWhpCWCs8v1eepM=`). Run on the box:
+   `openssl s_client -connect relay.sublemonable.com:443 -servername relay.sublemonable.com </dev/null 2>/dev/null | openssl x509 -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256 -binary | base64`
+2. **TLS handshakes arriving at Caddy** — need host-level Caddy access logs during
+   a live device attempt. Handshake present + no proxied request ⇒ pin (or
+   post-handshake) rejection. No handshake at all ⇒ :443 never reached (firewall/
+   DNS/Caddy-down).
+3. **`reuse_private_keys` in the LIVE Caddyfile** — inspect the actual Caddyfile on
+   the box. If absent, any past LE renewal could have rotated the leaf key out
+   from under the pins — a fully sufficient explanation for a pin mismatch.
+
+### HYPOTHESES (ranked, none proven)
+
+- **H1 — certificate pin mismatch (leading).** Consistent with every confirmed
+  fact. Most likely mechanism: `reuse_private_keys` missing/ineffective on the
+  live box → a cert renewal since 2026-06-18 (pin commit `878e5e1`) rotated the
+  leaf key → pins no longer match. Cannot confirm without box access.
+- **H2 — TLS-version mismatch (same silent class, do not overlook).**
+  `CertificatePinning.buildClient` pins `ConnectionSpec` to **TLS 1.3 ONLY**
+  (`tlsVersions(TlsVersion.TLS_1_3)`). If anything terminating :443 (Caddy
+  misconfig, or a fronting proxy/CDN) negotiates only TLS 1.2, the handshake
+  fails BEFORE pinning runs — also silently, also zero server logs. Less likely
+  (Caddy defaults to 1.3-capable) but in the same invisible-failure class, so
+  worth checking the `s_client` negotiated version in step 1.
+- **H3 — :443 not actually reachable from the device network** (box firewall only
+  opening :443 to certain sources, DNS on the device resolving elsewhere). Step 2
+  (no handshake at Caddy) would distinguish this from H1/H2.
+
+Deliberately did NOT pick a fix: rotating the server key, changing the shipped
+pins, or editing the Caddyfile all require box access AND knowing the live SPKI,
+neither available here. Changing shipped pins blind to the live cert would risk
+bricking a currently-working client. The confirmation gate must run first.
+
+### Shipped this session (safe, unconditional)
+
+- **Boot diagnostics** in `MessagingCoordinator.bootstrapLoop` (tag
+  `SublemonableBoot`, `Log.w`): per-attempt stage tracking (`ensure-identity` →
+  `generate-prekeys` → `register` → `create-session` → `ws-connect`), an explicit
+  "firing POST /api/v1/register" marker, and on failure the stage + exception
+  class/message. For a pin failure OkHttp's `SSLPeerUnverifiedException` message
+  lists the *served* SPKI hashes next to the pinned ones — enough to diagnose a
+  rotation from `adb logcat -s SublemonableBoot` alone. Fixed stage/milestone
+  strings + exception metadata only; never content, keys, tokens, ids, envelopes.
+- **ProGuard**: keep stripping `v/d/i/wtf` in release, stop stripping `w/e`, so the
+  diagnostics survive minification (the builds where the silent failure was
+  actually observed).
+- **Review fixes** (Gemini/Copilot/Codex on PR #19): rethrow
+  `CancellationException` in the boot `onFailure` (no false "failed" line on
+  normal teardown); use `createSession`'s returned token instead of re-reading
+  `api.accessToken` (avoids a Keystore decrypt); reword the ws success log — it's
+  now "socket handshake handed off", since `ws.connect()` only enqueues and the
+  real CONNECTED/failure transition arrives async via `ws.connectionState` (a
+  dead `/ws` is NOT observed in the boot loop); KDoc aligned to what's actually
+  logged; `wtf` restored to the strip set.
+
+### Recommended fix, GATED on confirmation (not shipped)
+
+- If step 1 shows a MISMATCH: prefer rotating the server back onto a pinned key if
+  the offline BACKUP key is what's now served (zero client change) — otherwise
+  ship updated pins matching the current live leaf, in ALL FOUR pin sources
+  (Android `CertificatePinning.kt`, iOS `PinnedSessionDelegate.swift`, desktop
+  `pinning.rs`, and the doc). Add `tls { reuse_private_keys }` to the live
+  Caddyfile so a future renewal can't silently recur this.
+- Regardless of which hypothesis lands: add a distinct user-visible "connection
+  failed — certificate/transport verification error" state instead of the
+  indefinite silent "Connecting…". Deliberately NOT shipped this run: it presumes
+  the diagnosis and touches shared connectivity UI state; recommend as the
+  immediate follow-up once `adb logcat -s SublemonableBoot` (or the box steps)
+  names the real failure stage.
+
+### Next action
+
+Operator to run steps 1–3 on the Hetzner box, and/or sideload the PR #19 build and
+capture `adb logcat -s SublemonableBoot` during a registration attempt. That output
+names the exact failing stage + exception and settles H1/H2/H3 without guessing.
