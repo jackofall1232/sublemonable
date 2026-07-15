@@ -1840,6 +1840,94 @@ an isolated port — `127.0.0.1:8445` this time — swap only the `server`
 compose service, confirm `/healthz`). Committed and pushed to
 `claude/server-xeddsa-verification`.
 
+## Run 15 — Onion mirror env vars missing from the server container: self-inflicted by Run 14's own compose invocations (2026-07-15)
+
+Trigger: reported that `docker compose config` correctly resolves
+`ONION_ADDRESS` (and friends) from `.env`, but a freshly recreated
+`sublemonable-server-1` showed zero ONION-related vars in its actual runtime
+environment — blocking the public/secret onion mirror's Host-based routing
+(API traffic on 8443 unaffected).
+
+### Root cause — confirmed with direct evidence, not guessed
+
+`docker inspect <container> --format '{{index .Config.Labels
+"com.docker.compose.project.config_files"}}'` on each container:
+
+- `sublemonable-server-1`: `docker-compose.yml` **only**
+- `sublemonable-tor-1` / `sublemonable-i2p-1`: all three files
+  (`docker-compose.yml,docker-compose.tor.yml,docker-compose.i2p.yml`)
+
+The base `docker-compose.yml`'s `server` service only defines `TOR_ENABLED`/
+`ONION_ADDRESS` in its `environment:` block. `ONION_SITE_DIR`,
+`PUBLIC_ONION_ADDRESS`, `SECRET_ONION_ADDRESS`, `RELAY_ONION_ADDRESS`,
+`I2P_ENABLED`, and `I2P_EEPSITE_DEST` are added ONLY by the `server:` merge
+blocks inside `docker-compose.tor.yml`/`docker-compose.i2p.yml` — this is
+documented at the top of both overlay files and in `docs/SELF_HOSTING.md`,
+which is explicit that the server must always be brought up/restarted with
+`-f docker-compose.yml -f docker-compose.tor.yml -f docker-compose.i2p.yml`,
+never a bare `docker compose ... server`.
+
+**This run's own Run 14 caused the regression.** Run 14 redeployed the
+server twice with plain `docker compose up -d server` (no `-f` flags) while
+testing the XEdDSA/Ed25519 fix. Each time, Compose read only the default
+file and recreated the container using just the base environment block,
+silently dropping the overlay vars that were present before (confirmed: Run
+14's own earlier `docker inspect sublemonable-server-1 ... Config.Env` output,
+taken before either redeploy, DID show `PUBLIC_ONION_ADDRESS`,
+`RELAY_ONION_ADDRESS`, `I2P_ENABLED=true`, etc.). Run 14 *did* notice the
+"Found orphan containers" warning Compose printed each time and reasoned
+correctly that no container got deleted (no `--remove-orphans` was passed) —
+but missed that the same file-scope gap also silently strips the overlays'
+contribution to the `server` service's own definition, not just the
+tor/i2p services. Ruled out per the task's checklist before landing on this:
+Dockerfile `ENTRYPOINT` is a direct distroless binary invocation with no
+wrapper/shell that could touch env (re-confirmed by reading it again); the
+image content was current, not stale (this is a compose invocation-scope
+bug, not a build/image bug).
+
+### Fix
+
+`docker compose -f docker-compose.yml -f docker-compose.tor.yml -f
+docker-compose.i2p.yml up -d server` — recreated the container with the
+correct file scope. Verified three ways:
+
+1. `docker inspect ... Config.Env` now lists all six vars with the correct
+   values from `.env`.
+2. `config_files` label now reads all three files, matching `tor-1`/`i2p-1`.
+3. **Functional check, not just env presence**: `curl -H "Host:
+   $PUBLIC_ONION_ADDRESS" http://127.0.0.1:8443/` now returns the actual
+   mirror `index.html` (200) — the thing that was reported broken. Confirmed
+   the Host-gate still fails closed for non-mirror hosts (relay onion,
+   clearnet hostname, no Host at all): none of them serve the mirror.
+   `/healthz` reflects the restored config too (`i2p_enabled: true`,
+   `tor_enabled: true`, `i2p_dest` populated).
+
+(Aside, not fixed, out of scope: `GET /` with a non-mirror Host returns
+`500 {"error":"internal"}` rather than a plain `404` — reproduces even with
+no custom Host header at all, so it's Fiber's fallback-route behavior, not
+something this run's fix touched or broke; `/healthz` and the actual API
+routes are unaffected. Worth a look sometime, not urgent.)
+
+### Operational lesson for future runs (recorded so this doesn't repeat)
+
+**Never run `docker compose ... server` (or any bare `docker compose`
+command targeting the `server` service) on this box without `-f
+docker-compose.yml -f docker-compose.tor.yml -f docker-compose.i2p.yml`.**
+Compose's multi-file merge means the overlays aren't just "additional
+services" — they also inject required config into the base `server`
+service definition itself, so omitting them doesn't just skip the tor/i2p
+containers, it silently downgrades the server's own environment. This
+applies to every future redeploy, not just Run 14's — worth a standing
+reminder here since the natural instinct (as this run's Run 14 half proved)
+is to reach for the short command specifically *because* only the `server`
+service needs recreating.
+
+### Next action
+
+None outstanding from this specific run — the reported symptom is fixed and
+functionally verified. If a future run needs to redeploy `server` again, use
+the full three-file invocation above.
+
 ## Run 11 — On-device (adb-free) connection diagnostics for v1.5.3 (2026-07-15)
 
 Branch: `claude/android-registration-tracing-2b7du2` (restarted from `origin/main`

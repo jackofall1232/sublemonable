@@ -31,6 +31,16 @@ Sublemonable repo.
 - Scaffolding/memory tooling generates or edits files only; it does not execute deploys, key
   generation, or server access. Every implementation loop should update `.l00prite/` memory
   before stopping.
+- **Never run a bare `docker compose ...` command against the `server` service on the production
+  box — always `-f docker-compose.yml -f docker-compose.tor.yml -f docker-compose.i2p.yml`.** The
+  overlays don't just add the `tor`/`i2p` containers; they merge additional required environment
+  (`PUBLIC_ONION_ADDRESS`, `SECRET_ONION_ADDRESS`, `RELAY_ONION_ADDRESS`, `ONION_SITE_DIR`,
+  `I2P_ENABLED`, `I2P_EEPSITE_DEST`) directly into the base `server` service definition. A bare
+  `docker compose up -d server` silently recreates the container with that config missing — no
+  error, no warning about the missing env (only an easy-to-dismiss "orphan containers" notice about
+  `tor`/`i2p`) — and breaks the onion mirror's Host-based routing while the API on 8443 keeps
+  working fine, so it's easy to ship and not notice. This happened for real in `.l00prite/ledger.md`
+  Run 14/15 — caused and then fixed within the same investigation.
 
 ## User Preferences
 
