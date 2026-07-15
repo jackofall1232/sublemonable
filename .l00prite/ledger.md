@@ -961,6 +961,11 @@ ways before the flip: (a) maintainer-provided value, (b) GitHub server-computed 
 - **Both Tor `.onion` mirrors** — no Tor client in this cloud session; their live state was not
   independently fetched here. They were staged during the box release run; verify over Tor from a
   Tor-capable host if independent confirmation is required.
-- **Clearnet live page** — verification attempt + result recorded inline in the session (fetch of
-  `sublemonable.com/download/beta` post-deploy). See session notes for the Vercel deploy + live-page
-  outcome.
+- **Clearnet live page + Vercel deploy** — could NOT verify from this cloud session. This
+  environment's network policy blocks outbound CONNECT to `sublemonable.com:443` AND
+  `vercel.com:443` (both 403 at the agent-proxy gateway — "policy denial"), and no non-PR
+  commit-status tool is exposed to read Vercel's GitHub status for the `main` commit. The flip is
+  committed + pushed to `main` (`561e43b`, in `24a4f32`), which is what triggers the production
+  Vercel deploy — but that the deploy completed and `/download/beta` serves v1.5.1 + the
+  `48b5258c…` checksum **needs manual confirmation** from a host that can reach the clearnet site
+  (or the Vercel dashboard). NOT reported as done here.
