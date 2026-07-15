@@ -44,7 +44,12 @@ class BootDiagnostics(context: Context) {
     // the boot coroutine while the Diagnostics screen may read concurrently.
     private val lock = Any()
 
-    private val _entries = MutableStateFlow(loadEntries())
+    // Guards the one-time lazy load. Construction touches NO disk (it runs on
+    // the main thread inside Application.onCreate); every disk read happens
+    // off-main and at most once — on the first record() (boot coroutine) or the
+    // first refresh() (the Diagnostics screen, on Dispatchers.IO).
+    private var loaded = false
+    private val _entries = MutableStateFlow<List<String>>(emptyList())
 
     /**
      * Recorded lines, oldest-first / most-recent-last. The Diagnostics screen
@@ -53,31 +58,51 @@ class BootDiagnostics(context: Context) {
      */
     val entries: StateFlow<List<String>> = _entries.asStateFlow()
 
+    /** Seed in-memory state from disk exactly once. Caller MUST hold [lock]. */
+    private fun ensureLoadedLocked() {
+        if (loaded) return
+        _entries.value = readFile()
+        loaded = true
+    }
+
+    /**
+     * Load persisted entries into memory if not already loaded. Does disk I/O —
+     * call OFF the main thread (the Diagnostics screen does, on open). Surfaces a
+     * previous process's log before this process has recorded anything itself.
+     */
+    fun refresh() = synchronized(lock) { ensureLoadedLocked() }
+
     /**
      * Append one privacy-safe [line] (timestamped, UTC) and rotate to the last
-     * [MAX_ENTRIES]. Never throws.
+     * [MAX_ENTRIES], writing the whole capped window back. Uses the in-memory
+     * list as the source of truth — no per-write disk read. Never throws. Runs
+     * on the boot coroutine (off-main); the first call seeds from disk.
      */
     fun record(line: String) {
         val stamped = "${TS.format(Instant.now())}  $line"
         synchronized(lock) {
-            val next = rotateEntries(loadEntries(), stamped, MAX_ENTRIES)
+            ensureLoadedLocked()
+            val next = rotateEntries(_entries.value, stamped, MAX_ENTRIES)
             runCatching { file.writeText(next.joinToString("\n") + "\n") }
             _entries.value = next
         }
     }
 
-    /** Full contents as one string, for display and copy. Empty when no runs yet. */
-    fun readAll(): String = entries.value.joinToString("\n")
-
-    /** Wipe the log — a user action from the Diagnostics screen. */
+    /** Wipe the log — a user action from the Diagnostics screen (call off-main). */
     fun clear() {
         synchronized(lock) {
-            runCatching { if (file.exists()) file.delete() }
+            // Truncate FIRST so a delete that fails or throws can't leave stale
+            // entries to reappear on the next process start (an emptied file
+            // reads back as no entries); then best-effort remove the file.
+            runCatching { file.writeText("") }
+            runCatching { file.delete() }
             _entries.value = emptyList()
+            // Memory is now the authoritative (empty) state; don't re-read disk.
+            loaded = true
         }
     }
 
-    private fun loadEntries(): List<String> = runCatching {
+    private fun readFile(): List<String> = runCatching {
         if (file.exists()) file.readText().split("\n").filter { it.isNotBlank() } else emptyList()
     }.getOrDefault(emptyList())
 
