@@ -17,6 +17,7 @@ import com.sublemonable.app.data.MessageState
 import com.sublemonable.app.net.ApiClient
 import com.sublemonable.app.net.WsClient
 import com.sublemonable.app.notifications.MessagingNotifications
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -171,11 +172,19 @@ class MessagingCoordinator(
                     Log.w(TAG, "boot[$attempt]: registration accepted by server")
                 }
                 stage = "create-session"
-                api.createSession(signal::signLoginChallenge)
+                val tokens = api.createSession(signal::signLoginChallenge)
                 stage = "ws-connect"
-                val token = api.accessToken ?: error("no access token issued")
-                ws.connect(token)
+                // Use the freshly-minted token directly rather than reading it
+                // back through api.accessToken — that getter decrypts from
+                // EncryptedSharedPreferences (Android Keystore) on every call,
+                // and the return value is already non-null.
+                ws.connect(tokens.accessToken)
             }.onFailure { e ->
+                // A cancelled boot (normal teardown via stop()/logout) surfaces
+                // here as CancellationException; rethrow it so structured
+                // cancellation propagates and we don't log a false "failed"
+                // line for an expected shutdown.
+                if (e is CancellationException) throw e
                 // Transport diagnostics only. An SSLPeerUnverifiedException
                 // here means certificate pinning rejected the served leaf —
                 // OkHttp's message lists the served SPKI hashes next to the
