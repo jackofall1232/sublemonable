@@ -13,9 +13,13 @@ import (
 
 // VerifyXEdDSA verifies an XEdDSA signature — the Curve25519-based signing
 // scheme used by libsignal-client's IdentityKeyPair/Curve.calculateSignature
-// (https://moderncrypto.org/mail-archive/curves/2014/000205.html), which is
-// what every Sublemonable client signs with (identity keys are Curve25519,
-// required for X3DH's Diffie-Hellman agreement; see docs/SECURITY_MODEL.md).
+// (https://moderncrypto.org/mail-archive/curves/2014/000205.html). This is
+// what Android/iOS clients sign with (identity keys are Curve25519, required
+// for X3DH's Diffie-Hellman agreement); web/desktop clients sign with plain
+// Ed25519 instead (see docs/SECURITY_MODEL.md's "Identity-key signing scheme
+// differs by platform" and the dual-scheme callers in handlers.go/jwt.go —
+// this function covers only the Android/iOS half of that split, not "every
+// client").
 //
 // This is NOT plain Ed25519: curve25519PublicKey is a Montgomery-form X25519
 // public key (a "u" coordinate), not an Edwards-form Ed25519 public key, and
@@ -50,13 +54,21 @@ func VerifyXEdDSA(curve25519PublicKey, message, signature []byte) bool {
 
 	// Convert the Montgomery-form public key into the corresponding
 	// Edwards-form Ed25519 public key: ed_y = (mont_x - 1) / (mont_x + 1).
-	var edY, one, montX, montXMinusOne, montXPlusOne field.Element
+	var edY, zero, one, montX, montXMinusOne, montXPlusOne field.Element
 	if _, err := montX.SetBytes(publicKey[:]); err != nil {
 		return false
 	}
+	zero.Zero()
 	one.One()
 	montXMinusOne.Subtract(&montX, &one)
 	montXPlusOne.Add(&montX, &one)
+	// mont_x = -1 (mod p) makes the map undefined (mont_x+1 = 0, with no
+	// inverse); Invert would silently return 0 rather than erroring, so
+	// reject this degenerate public key explicitly instead of letting a
+	// meaningless edY = 0 flow into ed25519.Verify below.
+	if montXPlusOne.Equal(&zero) == 1 {
+		return false
+	}
 	montXPlusOne.Invert(&montXPlusOne)
 	edY.Multiply(&montXMinusOne, &montXPlusOne)
 

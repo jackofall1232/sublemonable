@@ -119,3 +119,20 @@ func TestVerifyXEdDSA_RejectsMalformedLengths(t *testing.T) {
 		t.Fatal("accepted a 65-byte signature")
 	}
 }
+
+// Degenerate public key: u = -1 (mod p), i.e. mont_x+1 = 0. The birational
+// map ed_y = (mont_x-1)/(mont_x+1) is undefined here — field.Element.Invert
+// returns 0 rather than erroring on a zero input, so without an explicit
+// check this would silently produce edY = 0 and hand a meaningless key to
+// ed25519.Verify instead of failing deterministically (review: Copilot on
+// PR #22). u = p-1, little-endian encoded, top bit already clear.
+const xeddsaDegenerateMontgomeryMinusOneB64 = "7P///////////////////////////////////////38="
+
+func TestVerifyXEdDSA_RejectsDegenerateMontgomeryMinusOne(t *testing.T) {
+	pub := mustDecode(t, xeddsaDegenerateMontgomeryMinusOneB64)
+	msg := mustDecode(t, xeddsaChallengeB64)
+	sig := mustDecode(t, xeddsaLoginSigB64)
+	if VerifyXEdDSA(pub, msg, sig) {
+		t.Fatal("accepted a signature under the degenerate u=-1 public key")
+	}
+}
