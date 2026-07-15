@@ -301,7 +301,7 @@ private fun SublemonableRoot(
                     mutableStateOf(TorIntegration.isOrbotInstalled(context))
                 }
                 val lifecycleOwner = LocalLifecycleOwner.current
-                DisposableEffect(lifecycleOwner) {
+                DisposableEffect(lifecycleOwner, context) {
                     val observer = LifecycleEventObserver { _, event ->
                         if (event == Lifecycle.Event.ON_RESUME) {
                             torAvailable = TorIntegration.isOrbotInstalled(context)
