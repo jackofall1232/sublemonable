@@ -52,6 +52,39 @@ The server's role is reduced to three functions:
 | Session keys | — | Per session | Derived via X3DH, advanced by Double Ratchet |
 | Message keys | AES-256-GCM | Single message | Derived per message, discarded after use |
 
+#### Identity-key signing scheme differs by platform (server accepts both)
+
+The X25519 (Curve25519) public key used for X3DH's Diffie-Hellman step is
+consistent everywhere, but **how the identity key signs the signed prekey and
+the login challenge currently differs by platform**, because two different
+crypto stacks are in use (see "Libraries" above):
+
+- **Android/iOS** (`libsignal-client`): a single Curve25519 keypair is
+  generated (`IdentityKeyPair.generate()`); the same private scalar signs
+  directly via **XEdDSA**
+  (https://moderncrypto.org/mail-archive/curves/2014/000205.html), libsignal's
+  Curve25519-native signing scheme. No separate Ed25519 keypair ever exists.
+- **Web/desktop** (`libsodium.js`, `packages/crypto/src/keys.ts`): a genuine
+  **Ed25519** keypair is generated first (`crypto_sign_keypair`); its X25519
+  form is derived separately, only for the X3DH DH step
+  (`crypto_sign_ed25519_pk_to_curve25519`). Signing uses standard Ed25519
+  (`crypto_sign_detached`) over the identity key's own Ed25519 form directly.
+
+The published `identity_key` is therefore a Curve25519 u-coordinate from
+mobile clients but a genuine Ed25519 point from web/desktop — and the two
+platforms sign different byte strings for a signed prekey (mobile signs
+libsignal's 33-byte type-tagged `serialize()` form; web/desktop signs the raw
+32-byte prekey directly). The server verifies both conventions
+(`server/internal/auth/xeddsa.go`'s `VerifyXEdDSA`, tried alongside plain
+`ed25519.Verify` in `Register`/`UploadPrekeys`/`VerifyLogin`) rather than
+picking one, so neither platform's client needs to change. This split was
+discovered while investigating a registration bug that affected mobile only
+(web/desktop's Ed25519 path was — and still is — correct); see
+`.l00prite/ledger.md` Run 12–14 for the full investigation and the reasoning
+for accepting both instead of converging on one. Converging every platform on
+a single scheme remains open (tracked in `.l00prite/todos.md`) but is a
+separate, larger change, not required for correctness today.
+
 ## Key generation and storage per platform
 
 - **Web:** Keys live inside the multi-vault image — a single fixed-size record in IndexedDB (see

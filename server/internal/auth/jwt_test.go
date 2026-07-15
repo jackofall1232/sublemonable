@@ -6,6 +6,7 @@
 package auth
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -78,12 +79,14 @@ func TestTamperedTokenRejected(t *testing.T) {
 }
 
 // Real libsignal-client vectors (generated via IdentityKeyPair.generate() +
-// Curve.calculateSignature() — the exact client code path, see xeddsa_test.go
-// for provenance/regeneration notes), NOT ed25519.GenerateKey/ed25519.Sign.
-// A plain-Ed25519 keypair does not exercise VerifyLogin's real code path:
-// identity keys are Curve25519, signed with XEdDSA (VerifyXEdDSA), and a
-// self-generated Go-side Ed25519 signature would pass a Go-side Ed25519
-// checker trivially without proving the actual client/server contract works.
+// Curve.calculateSignature() — the exact mobile client code path, see
+// xeddsa_test.go for provenance/regeneration notes), NOT ed25519.GenerateKey/
+// ed25519.Sign — this exercises VerifyLogin's XEdDSA branch specifically. A
+// self-generated Go-side Ed25519 signature would only prove the OTHER
+// (web/desktop) branch works; see TestLoginChallenge_WebStyleEd25519 below
+// for that one, where generating with ed25519.GenerateKey IS the right test
+// (it's exactly what a genuine-Ed25519 client does, and this is testing
+// VerifyLogin's dispatch, not re-deriving crypto primitives).
 const (
 	loginTestIdentityRaw32B64 = "qpblp1zlEzle3zMgnFcP8EMULiHr9nFwrb3IVXOENzw="
 	loginTestOtherRaw32B64    = "wcicHYcoPMrc9XU8FdZOqbIqQBH7Q7i4u/Afk9t1sRo="
@@ -120,6 +123,32 @@ func TestLoginChallenge(t *testing.T) {
 	tampered[0] ^= 0x01
 	if err := VerifyLogin(pub, accountID, now, tampered, now); err == nil {
 		t.Fatal("tampered signature accepted")
+	}
+}
+
+// Covers VerifyLogin's other branch: a genuine Ed25519 identity key, exactly
+// as apps/web/apps/desktop generate via packages/crypto/src/keys.ts
+// (sodium.crypto_sign_keypair + crypto_sign_detached, both standard Ed25519).
+// This convention was independently confirmed live against production in
+// Run 14 (a real Node.js-generated Ed25519 registration request got a live
+// 201 from the still-unmodified server) — this test pins that same
+// dual-scheme behavior at the unit level so a future change can't silently
+// drop web/desktop support while "fixing" the mobile path again.
+func TestLoginChallenge_WebStyleEd25519(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accountID := uuid.New()
+	now := time.Now()
+	sig := ed25519.Sign(priv, LoginMessage(accountID, now))
+
+	if err := VerifyLogin(pub, accountID, now, sig, now); err != nil {
+		t.Fatalf("valid web-style login rejected: %v", err)
+	}
+	otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	if err := VerifyLogin(otherPub, accountID, now, sig, now); err == nil {
+		t.Fatal("forged web-style login accepted")
 	}
 }
 

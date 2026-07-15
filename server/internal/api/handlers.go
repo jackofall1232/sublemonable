@@ -96,10 +96,32 @@ func errJSON(c *fiber.Ctx, status int, code string) error {
 // will be rejected as invalid (see .l00prite/ledger.md Run 12/14).
 const djbType = 0x05
 
-// signedPrekeyMessage reconstructs the exact byte string a client signed for
-// a signed prekey, from the raw 32-byte wire form.
+// signedPrekeyMessage reconstructs the exact byte string a mobile client
+// signed for a signed prekey, from the raw 32-byte wire form.
 func signedPrekeyMessage(rawPublicKey []byte) []byte {
 	return append([]byte{djbType}, rawPublicKey...)
+}
+
+// verifySignedPrekey accepts either of the two (scheme, message-framing)
+// pairs actually in use across shipped clients — these are coupled per
+// platform, not four independent combinations to try:
+//   - Web/desktop (packages/crypto/src/keys.ts): a genuine Ed25519 keypair,
+//     signing the raw 32-byte prekey public key directly.
+//   - Android/iOS (libsignal-client): a Curve25519 identity key, XEdDSA-
+//     signing the 33-byte libsignal serialize() form.
+//
+// See .l00prite/ledger.md Run 14: the server originally verified only the
+// first (which is why web/desktop registration worked), then briefly only
+// the second (which would have fixed mobile but broken the web/desktop path
+// that was already working live) — this accepts both so neither platform's
+// client needs to change. Both branches independently enforce their own
+// key/signature length and validity checks, so this doesn't accept anything
+// beyond "valid under exactly one of the two real schemes."
+func verifySignedPrekey(identityKey, rawPublicKey, signature []byte) bool {
+	if ed25519.Verify(identityKey, rawPublicKey, signature) {
+		return true
+	}
+	return auth.VerifyXEdDSA(identityKey, signedPrekeyMessage(rawPublicKey), signature)
 }
 
 // ── registration ─────────────────────────────────────────────────────────────
@@ -137,10 +159,9 @@ func (h *Handlers) Register(c *fiber.Ctx) error {
 		return errJSON(c, fiber.StatusBadRequest, "bad_signed_prekey")
 	}
 	// The server verifies the prekey signature too — a malformed bundle should
-	// never be servable to other clients. Identity keys are Curve25519,
-	// signed with libsignal's XEdDSA scheme (see auth.VerifyXEdDSA) — not
-	// plain Ed25519.
-	if !auth.VerifyXEdDSA(identityKey, signedPrekeyMessage(spkPub), spkSig) {
+	// never be servable to other clients. See verifySignedPrekey: identity
+	// keys and signing schemes differ by platform.
+	if !verifySignedPrekey(identityKey, spkPub, spkSig) {
 		return errJSON(c, fiber.StatusBadRequest, "bad_prekey_signature")
 	}
 
@@ -174,8 +195,10 @@ type sessionRequest struct {
 	Signature string `json:"signature"`
 }
 
-// CreateSession authenticates by Ed25519 signature over a timestamped
-// challenge — possession of the identity key IS the account.
+// CreateSession authenticates by signature over a timestamped challenge —
+// possession of the identity key IS the account. See auth.VerifyLogin: the
+// signing scheme (plain Ed25519 or libsignal's XEdDSA) differs by platform,
+// docs/SECURITY_MODEL.md "Identity-key signing scheme differs by platform".
 func (h *Handlers) CreateSession(c *fiber.Ctx) error {
 	var req sessionRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -309,7 +332,7 @@ func (h *Handlers) UploadPrekeys(c *fiber.Ctx) error {
 		pub, err1 := base64.StdEncoding.DecodeString(req.SignedPrekey.PublicKey)
 		sig, err2 := base64.StdEncoding.DecodeString(req.SignedPrekey.Signature)
 		if err1 != nil || err2 != nil || len(pub) != 32 ||
-			!auth.VerifyXEdDSA(identityKey, signedPrekeyMessage(pub), sig) {
+			!verifySignedPrekey(identityKey, pub, sig) {
 			return errJSON(c, fiber.StatusBadRequest, "bad_signed_prekey")
 		}
 		if err := h.store.UpsertSignedPrekey(ctx, accountID, req.SignedPrekey.ID, pub, sig); err != nil {
