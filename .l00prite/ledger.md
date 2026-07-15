@@ -1187,3 +1187,67 @@ bricking a currently-working client. The confirmation gate must run first.
 Operator to run steps 1–3 on the Hetzner box, and/or sideload the PR #19 build and
 capture `adb logcat -s SublemonableBoot` during a registration attempt. That output
 names the exact failing stage + exception and settles H1/H2/H3 without guessing.
+
+## Run 11 — On-device (adb-free) connection diagnostics for v1.5.3 (2026-07-15)
+
+Branch: `claude/android-registration-tracing-2b7du2` (restarted from `origin/main`
+`8e6e8c6` after PR #19 merged — fresh work, not stacked on merged history).
+
+Motivation: the Run 10 diagnostics require `adb logcat` to read, which is
+unusable in the actual test setup (no `adb` on the device, no package manager in
+the available terminals, no second machine). So the boot diagnostics were made
+readable ON the device itself.
+
+### Shipped
+
+- **`diagnostics/BootDiagnostics.kt`** — app-private, capped, on-device log.
+  Writes each boot line (UTC-timestamped) to `filesDir/boot-diagnostics.log`,
+  rotated to the most-recent `MAX_ENTRIES = 50` lines (unbounded-growth guard).
+  Exposes a `StateFlow<List<String>>` so the Diagnostics screen updates live
+  while a boot attempt runs. All disk ops are best-effort (`runCatching`) so a
+  diagnostics IO failure can never break the boot path. Content is the SAME
+  privacy-safe set already emitted to logcat — stage/milestone markers +
+  exception class/message only; no content, keys, tokens, account ids.
+- **`MessagingCoordinator`** — new `diagnostics` ctor dependency + a `diag()`
+  helper that writes each boot line to BOTH logcat (`Log.w`, tag
+  `SublemonableBoot`, for when `adb` IS available) and `BootDiagnostics`. The
+  four boot lines now route through `diag()`. Failure line's comment expanded to
+  map exception signatures to the pin investigation's hypotheses.
+- **`ui/screens/DiagnosticsScreen.kt`** — Settings → Diagnostics. Plain,
+  monospace, selectable (`SelectionContainer`) + scrollable text with Copy and
+  Clear actions and an empty-state hint. Reachable via a new "Connection
+  diagnostics" row in Settings and a `Route.Diagnostics` (back → Settings).
+- **`SublemonableApp` / `MainActivity` / `SettingsScreen`** — DI wiring, route,
+  and the Settings entry point.
+- **Version bump** `1.5.2`/vc4 → `1.5.3`/vc5; CHANGELOG `[1.5.3]` entry. Test
+  `BootDiagnosticsTest` covers the rotation cap (pure JVM; the Context/file path
+  needs an instrumented test, noted).
+
+### Could NOT do this run (honest, unchanged constraint)
+
+- **Item 5 — confirm the actual root cause — NOT done here.** It requires running
+  the app on a device; this environment has no Android SDK and Gradle can't even
+  fetch its distribution (proxy 403), so no build/emulator/device is possible.
+  That is the whole reason for this feature: the confirmation now runs ON the
+  user's device with zero `adb`. Local compile was not possible either — CI
+  compiles the Android module (as every prior Android run relied on).
+- The pin-vs-TLS-1.3 question from Run 10 is unchanged and still unconfirmed.
+
+### How to confirm the root cause with this feature (for the operator/user)
+
+Install the v1.5.3 build, unlock, then open Settings → Diagnostics and read the
+`failed at stage=…` line. The exception discriminates the Run-10 hypotheses:
+
+- `…SSLPeerUnverifiedException: Certificate pinning failure! Peer certificate
+  chain: sha256/…` → **H1 pin mismatch** (the served SPKI is printed right there;
+  compare to `TZbasNP1…` / `BoqfuAlHF…`).
+- `…SSLHandshakeException` / "no cipher suites in common" / a TLS-version/protocol
+  complaint → **H2**: the TLS-1.3-only `ConnectionSpec` vs. what :443 negotiates.
+- `…ConnectException` / `SocketTimeoutException` / `UnknownHostException` → **H3**:
+  the relay/:443 simply isn't reachable from the device's network.
+- If the log shows `firing POST /api/v1/register` then a failure at
+  `stage=register`, the request WAS attempted (rules out "never fired"); the
+  exception says why it didn't land.
+
+Report that line back and the correct fix (pin rotation / shipped-pin update /
+Caddyfile `reuse_private_keys` / TLS config) follows without further guessing.

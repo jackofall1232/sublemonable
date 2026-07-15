@@ -40,6 +40,7 @@ import com.sublemonable.app.ui.components.buildContactExchangePayload
 import com.sublemonable.app.ui.screens.AddContactScreen
 import com.sublemonable.app.ui.screens.ChatListScreen
 import com.sublemonable.app.ui.screens.ChatScreen
+import com.sublemonable.app.ui.screens.DiagnosticsScreen
 import com.sublemonable.app.ui.screens.KeyVerificationScreen
 import com.sublemonable.app.ui.screens.LockScreen
 import com.sublemonable.app.ui.screens.OnboardingScreen
@@ -153,6 +154,7 @@ private sealed interface Route {
     data object ChatList : Route
     data class Chat(val conversationId: String) : Route
     data object Settings : Route
+    data object Diagnostics : Route
     data object AddContact : Route
     data class Verify(val conversationId: String) : Route
 }
@@ -209,6 +211,7 @@ private fun SublemonableRoot(
     BackHandler(enabled = route !is Route.ChatList && unlocked) {
         route = when (val current = route) {
             is Route.Verify -> Route.Chat(current.conversationId)
+            is Route.Diagnostics -> Route.Settings
             else -> Route.ChatList
         }
     }
@@ -335,8 +338,14 @@ private fun SublemonableRoot(
                             route = Route.Splash
                         }
                     },
+                    onOpenDiagnostics = { route = Route.Diagnostics },
                 )
             }
+
+            Route.Diagnostics -> DiagnosticsScreen(
+                diagnostics = container.bootDiagnostics,
+                onBack = { route = Route.Settings },
+            )
 
             Route.AddContact -> {
                 // Build our own shareable code from the registered identity.

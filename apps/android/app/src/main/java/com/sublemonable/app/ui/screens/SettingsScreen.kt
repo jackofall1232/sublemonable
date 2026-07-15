@@ -66,6 +66,7 @@ fun SettingsScreen(
     torAvailable: Boolean,
     onBack: () -> Unit,
     onDeleteAccount: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val settings by settingsRepository.settings.collectAsState()
@@ -262,6 +263,17 @@ fun SettingsScreen(
                 verified = transport == TransportState.TOR || transport == TransportState.I2P,
             )
         }
+
+        // ----- Diagnostics ---------------------------------------------------
+        SectionHeader("Diagnostics")
+        ClickableRow(
+            title = "Connection diagnostics",
+            // The self-serve answer to "it just says Connecting…": an on-device,
+            // adb-free log of every registration/connection attempt.
+            subtitle = "On-device log of registration & connection attempts. " +
+                "Open it if you're stuck on “Connecting…”, and share it in a bug report.",
+            onClick = onOpenDiagnostics,
+        )
 
         // ----- Appearance ----------------------------------------------------
         SectionHeader("Appearance")

@@ -8,6 +8,7 @@ package com.sublemonable.app
 import android.content.Context
 import android.util.Log
 import com.sublemonable.app.crypto.SignalProtocolManager
+import com.sublemonable.app.diagnostics.BootDiagnostics
 import com.sublemonable.app.data.Conversation
 import com.sublemonable.app.data.ConversationRepository
 import com.sublemonable.app.data.Message
@@ -53,9 +54,13 @@ import kotlin.math.min
  * certificate-pin mismatches). All of these strings are compile-time
  * constants or exception metadata — no message content, keys, tokens,
  * account ids, or envelope fields ever flow through them, so nothing
- * sensitive can leak into logcat. Without it, a certificate-pinning failure
- * or a dead relay is indistinguishable from airplane mode — the app retries
- * forever with no signal anywhere, client or server.
+ * sensitive can leak. Without it, a certificate-pinning failure or a dead
+ * relay is indistinguishable from airplane mode — the app retries forever
+ * with no signal anywhere, client or server.
+ *
+ * Each such line goes to logcat AND to [BootDiagnostics] (an app-private,
+ * capped, on-device file surfaced in Settings → Diagnostics), so a user with
+ * no access to `adb` can still read and share the exact failure. See [diag].
  */
 class MessagingCoordinator(
     private val appContext: Context,
@@ -65,6 +70,7 @@ class MessagingCoordinator(
     private val ws: WsClient,
     private val messages: MessageRepository,
     private val conversations: ConversationRepository,
+    private val diagnostics: BootDiagnostics,
 ) : WsClient.Listener {
 
     private val _typingPeers = MutableStateFlow<Set<String>>(emptySet())
@@ -169,9 +175,9 @@ class MessagingCoordinator(
                     // (public keys only). The client-side null-guard +
                     // single-flight prevents the common case, not this window.
                     stage = "register"
-                    Log.w(TAG, "boot[$attempt]: firing POST /api/v1/register")
+                    diag("boot[$attempt]: firing POST /api/v1/register")
                     registration?.invoke()
-                    Log.w(TAG, "boot[$attempt]: registration accepted by server")
+                    diag("boot[$attempt]: registration accepted by server")
                 }
                 stage = "create-session"
                 val tokens = api.createSession(signal::signLoginChallenge)
@@ -187,13 +193,15 @@ class MessagingCoordinator(
                 // cancellation propagates and we don't log a false "failed"
                 // line for an expected shutdown.
                 if (e is CancellationException) throw e
-                // Transport diagnostics only. An SSLPeerUnverifiedException
-                // here means certificate pinning rejected the served leaf —
-                // OkHttp's message lists the served SPKI hashes next to the
-                // pinned ones, which is exactly what's needed to diagnose a
-                // pin rotation in the field.
-                Log.w(
-                    TAG,
+                // Transport diagnostics only. The exception class + message is
+                // what discriminates the failure: SSLPeerUnverifiedException
+                // ("Certificate pinning failure!" — OkHttp lists the served
+                // SPKI hashes next to the pinned ones) points at a pin
+                // rotation; SSLHandshakeException / "no cipher suites in
+                // common" / a TLS-version complaint points at the TLS-1.3-only
+                // ConnectionSpec vs. the server's negotiation; Connect/
+                // UnknownHost points at the relay simply being unreachable.
+                diag(
                     "boot[$attempt]: failed at stage=$stage: " +
                         "${e.javaClass.name}: ${e.message}",
                 )
@@ -205,7 +213,7 @@ class MessagingCoordinator(
                 // which drives the UI connectivity badge — NOT observed here.
                 // So this marks the boot chain reaching a live session and
                 // handing the socket off, not a confirmed-open socket.
-                Log.w(TAG, "boot[$attempt]: session minted, socket handshake handed off")
+                diag("boot[$attempt]: session minted, socket handshake handed off")
                 // Reaching a live socket IS success. Signed-prekey rotation is
                 // best-effort and must NOT fail the boot — a failed upload here
                 // would otherwise tear down the healthy socket on the next
@@ -230,6 +238,17 @@ class MessagingCoordinator(
         linkJob?.cancel()
         ws.presenceUpdate(online = false)
         ws.disconnect()
+    }
+
+    /**
+     * Emit one privacy-safe boot-diagnostic line to BOTH logcat (when `adb` is
+     * available) and the on-device [BootDiagnostics] file (Settings →
+     * Diagnostics, for when it isn't). Callers must pass only fixed stage
+     * strings + exception metadata — never user data. See the class kdoc.
+     */
+    private fun diag(line: String) {
+        Log.w(TAG, line)
+        diagnostics.record(line)
     }
 
     /** Encrypt-then-send. X3DH session is established lazily on first send. */
