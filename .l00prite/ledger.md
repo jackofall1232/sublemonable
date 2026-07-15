@@ -1188,6 +1188,290 @@ Operator to run steps 1–3 on the Hetzner box, and/or sideload the PR #19 build
 capture `adb logcat -s SublemonableBoot` during a registration attempt. That output
 names the exact failing stage + exception and settles H1/H2/H3 without guessing.
 
+## Run 12 — Registration 400 root-caused: Curve25519 wire-format + signature-scheme mismatch (2026-07-15)
+
+Branch: `claude/android-register-key-encoding` (from `origin/main` `42acf79`,
+after PR #20 merged). Trigger: with PR #20's on-device Diagnostics screen live,
+every registration attempt now reaches the server and gets back **HTTP 400**,
+consistently, across repeated boots — closing H1/H2/H3 from Run 10 (pinning/TLS/
+unreachable host). This run traces the 400 to its exact cause.
+
+### CONFIRMED — two independent bugs stacked on the same field
+
+**Bug 1 — wire-format length mismatch (client, fixed this run).**
+`ApiClient.register()` builds its JSON body from `SignalProtocolManager`
+DTOs, which encoded `identity_key`, `signed_prekey.public_key`, and each
+`one_time_prekeys[].public_key` via libsignal-client's `ECPublicKey.serialize()`
+— a **33-byte** value: a 1-byte DJB type-tag (`0x05`) prepended to the 32-byte
+raw Curve25519 key. Decompiled `libsignal-client-0.46.0.jar`
+(`ECPublicKey.class` via `javap`) confirms `getType()` reads `serialize()[0]` —
+proof the tag byte is really there, not a guess.
+
+The server's `registerRequest` (`internal/api/handlers.go:97-101`) base64-decodes
+`identity_key` and rejects unless `len(identityKey) == ed25519.PublicKeySize`
+(32) — `internal/api/handlers.go:114-117`, returning `errJSON(400,
+"bad_identity_key")` on any other length. 33 ≠ 32, every time, unconditionally —
+matches "consistently, across multiple boot attempts" exactly. `db/schema.sql:11`
+(`identity_key BYTEA NOT NULL, -- Ed25519 public key only`) and
+`docs/SECURITY_MODEL.md:49-51` (`Identity key | Curve25519`) both corroborate:
+the intended wire contract is the raw 32-byte key, not libsignal's internal
+type-prefixed serialization. **This is a client bug** — `getPublicKeyBytes()` is
+the correct accessor (confirmed present on the same class via `javap`) and was
+never used.
+
+**Bug 2 — signature scheme mismatch (server, NOT fixed this run — needs a
+maintainer + Go toolchain, see below).** Even with Bug 1 fixed, the signed-prekey
+signature would still fail server verification. The client signs with
+`Curve.calculateSignature()`, which is libsignal's **XEdDSA** over the
+Curve25519 (Montgomery-form) identity key — correct per
+`docs/SECURITY_MODEL.md` ("Signed prekey | Curve25519 | ... Signed by the
+identity key") and required anyway, since X3DH needs a Montgomery-form key for
+ECDH. The server verifies with **Go stdlib `crypto/ed25519.Verify`** directly on
+the raw key bytes (`internal/api/handlers.go:125`,
+`internal/auth/jwt.go:93` for login) — plain RFC 8032 Ed25519 (twisted-Edwards
+form), with no Montgomery→Edwards conversion step anywhere in the server (grepped
+`internal/` for `xeddsa|birational|montgomery|edwards` — zero hits). These are
+different signature schemes over related-but-distinct curve representations;
+one does not verify the other's signatures.
+
+**Empirically confirmed, not just reasoned about the crypto:** generated a real
+`IdentityKeyPair` + signed-prekey via the vendored libsignal-client jar
+(`java -cp libsignal-client-0.46.0.jar`, small `Gen.java` harness, output kept at
+`/tmp/.../xeddsa_test` this session, not committed), producing an XEdDSA
+signature over the raw 32-byte prekey. Fed the raw identity public key into
+Node's stdlib Ed25519 verify (`crypto.verify(null, msg, jwkPublicKey, sig)` —
+same RFC 8032 primitive as Go's `ed25519.Verify`) against all four
+message/signature combinations (32-byte vs 33-byte message, matched vs
+mismatched signature). **All four returned `false`.** A same-process libsignal
+self-check on the identical signature returned `true`, confirming the signature
+itself is valid XEdDSA, not a harness bug — it simply isn't Ed25519-verifiable
+this way. So fixing Bug 1 alone would not fix registration; it would just trade
+`bad_identity_key` for `bad_prekey_signature` (register) / `unauthorized`
+(login) on the very next attempt.
+
+### Which side is "wrong"
+
+The **client's crypto is correct** per the documented design (Curve25519
+identity key, XEdDSA signing, matching X3DH's ECDH requirement) — this is not a
+client redesign candidate. The **server's verification is the bug**: it needs to
+do the Montgomery→Edwards conversion XEdDSA verification requires before calling
+into (or replacing) `ed25519.Verify`, everywhere an identity key checks a
+signature (`Register`'s signed-prekey check, `VerifyLogin`'s session-challenge
+check). This is exactly the kind of drift the two independently-maintained
+client/server contracts (no shared schema) will keep producing — see structural
+risk note below.
+
+### Why this was never caught: registration has likely never round-tripped
+against a live server on ANY platform
+
+`apps/ios/Sources/Crypto/SignalManager.swift:287-292` uses the identical
+`.serialize()` (type-prefixed) pattern and the identical libsignal XEdDSA
+signing convention for its own registration upload — so iOS would hit the same
+two bugs against this server. Every prior ledger entry that says "shipped" or
+"verified" (Runs 5-9) verified APK staging, mirror pages, Tor/I2P transport, and
+`.deb` install/launch — none of them exercised a live `POST /api/v1/register`
+round-trip against the real Go server end-to-end. This run is the first time
+that round trip has actually been observed (via PR #20's diagnostics), and it's
+never worked.
+
+### Shipped this run (client-side, safe, verified — Bug 1 only)
+
+- **`SignalProtocolManager.kt`**: `localIdentityPublicKeyBase64()`,
+  `generateSignedPreKey()`, and `generateOneTimePreKeys()` now encode
+  `getPublicKeyBytes()` (raw 32 bytes) instead of `serialize()` (33 bytes,
+  type-prefixed) for every key going into the register body. Critically, the
+  signed-prekey signature is now computed over the **same raw 32-byte value**
+  that gets uploaded (`Curve.calculateSignature(privateKey,
+  keyPair.publicKey.getPublicKeyBytes())`) — signing one representation while
+  uploading another would itself produce an unverifiable signature.
+- **`ApiClient.kt`**: `ApiException` gained an optional `responseBody: String?`
+  (defensively capped at 200 chars); the `execute()` failure branch now passes
+  the server's response body through instead of discarding it. The server's
+  error bodies are always `{"error": "<fixed-vocabulary-code>"}` from the
+  `errJSON` helper (`internal/api/handlers.go:85-87`) — schema-validation codes
+  like `bad_identity_key`, never request/response data — so this is privacy-safe
+  per the same policy the rest of `ApiClient`/`BootDiagnostics` already follow.
+- **`MessagingCoordinator.kt`**: the boot-failure `diag()` line now appends
+  `server_error=<body>` when the exception is an `ApiException` carrying one, so
+  a future contract-mismatch 400 is self-diagnosing from Settings → Diagnostics
+  alone (task's ask #4) — no repeat of this session's manual code-comparison.
+- **Not touched (out of scope for this task, flagged instead — see todos.md
+  "Next"):** `establishSession()` (`SignalProtocolManager.kt`, X3DH prekey-bundle
+  consumption) and `localIdentityPublicKeyBytes()` (safety numbers / fingerprint)
+  still use the type-prefixed `Curve.decodePoint`/`IdentityKey(byte[])`/
+  `serialize()` path. That's a different endpoint (`GET
+  /api/v1/users/:id/prekey`) than register, not reachable during boot, and not
+  part of "why does register return 400" — but it's the identical bug class and
+  will surface the moment two registered accounts try to message each other.
+  Deliberately not touched this run to keep the diff to the reported bug.
+
+### NOT shipped — the server fix, and why
+
+- **No server code changed.** Bug 2 (XEdDSA verification) is a cryptography
+  change to signature verification on both `Register` and `VerifyLogin` —
+  `constraints.md`'s hard rule is explicit: *"cryptography changes require a
+  detailed explanation reviewed by a maintainer."* The paragraphs above are that
+  explanation; the actual Go implementation should not be authored and merged in
+  the same pass that also discovered the bug, especially for auth-path crypto.
+- **No Go toolchain exists in this environment** (`which go` → nothing;
+  `/usr/local/go` absent; no apt/snap package). The task asks to "build, verify
+  compiles" — that's not possible for a server change here, and shipping an
+  unbuilt, untested change to signature verification would be worse than not
+  shipping.
+- Correct implementation needs the Montgomery-u → Edwards-y birational
+  conversion (`y = (u-1)/(u+1)`, canonical sign bit) done with a vetted
+  field-arithmetic library (e.g. `filippo.io/edwards25519`, not currently a
+  `go.mod` dependency) — hand-rolling this without a way to test it is exactly
+  the kind of crypto mistake that's easy to get subtly wrong (e.g. a wrong sign
+  convention that silently accepts forged signatures). Flagged in todos.md
+  "Next" for a maintainer with Go tooling, rather than guessed at here.
+
+### Structural risk (flagged per task item 6, not fixed)
+
+Client and server each define the registration/auth contract independently —
+there is no shared schema/spec `.md`/`.proto`/OpenAPI doc either side generates
+from or validates against. This exact bug class (silent field-encoding drift
+between independently-maintained client and server code) will recur. Worth a
+follow-up: either a small shared "wire contract" doc that both `ApiClient.kt`
+(and its iOS/web counterparts) and `internal/api/handlers.go` cite in comments
+at the relevant struct/DTO, or (bigger) generated types from one schema.
+Recorded here per the task's own ask; not actioned this run.
+
+### Tests run / Verification
+
+- `./gradlew :app:compileDebugKotlin` — **BUILD SUCCESSFUL** (14s). Confirms the
+  client-side encoding fix compiles.
+- `./gradlew :app:testDebugUnitTest` — **BUILD SUCCESSFUL** (21s), all existing
+  Android unit tests still pass (no test asserted on the old 33-byte format).
+- Empirical XEdDSA/Ed25519 incompatibility check — `java -cp
+  libsignal-client-0.46.0.jar Gen.java` (key/signature generation) piped into a
+  `node -e` script calling `crypto.verify(null, …, 'Ed25519', …)` — see Bug 2
+  above for the four-combination result (all `false`).
+- **Did NOT build/sign a release APK, did NOT touch `onion-site/`, did NOT push
+  anywhere.** No live server round-trip was attempted from this sandbox (same
+  egress restriction noted in Run 10); the fix is verified by compilation +
+  static contract comparison + the standalone crypto check above, not by a live
+  registration succeeding end-to-end. That end-to-end confirmation still needs
+  to happen on-device, and won't fully succeed until Bug 2 also ships.
+
+### Next action
+
+1. Maintainer: review the Bug 2 explanation above and either implement
+   Montgomery→Edwards XEdDSA verification server-side (register + login) or
+   direct a different fix if the intended contract is actually something else.
+2. Once server-side lands, rebuild the Android app with this branch's fix,
+   sideload, and confirm registration actually succeeds end-to-end (Bug 1 fix
+   alone will NOT get you there — see above).
+3. Apply the same fix to iOS (`SignalManager.swift` has the identical
+   `.serialize()` pattern) before assuming iOS registration works either.
+4. This run deliberately did not touch version numbers, CHANGELOG, or any
+   release/signing/publish step — see todos.md "Next" for why, and for the
+   deferred `establishSession`/safety-number follow-up.
+
+## Run 13 — PR #21 automated review response: fixed the deferred `establishSession`/safety-number gap and corrected the signed-prekey signing representation (2026-07-15)
+
+Branch: `claude/android-register-key-encoding` (same branch as Run 12, now
+pushed and opened as PR #21). Trigger: user asked to check PR comments and push
+necessary fixes. Three automated reviewers (Gemini Code Assist, GitHub Copilot,
+ChatGPT/Codex) left inline comments on PR #21's first commit (`82715a0`).
+
+### Review findings, and what was done about each
+
+1. **`localIdentityPublicKeyBytes()` still 33-byte `serialize()` — flagged by
+   all three reviewers (Gemini: high; Copilot; Codex: P2).** Used by
+   `safetyNumberWith()`/`localFingerprint()`, while
+   `localIdentityPublicKeyBase64()` (register upload, QR/`ContactExchangePayload`
+   per `ui/components/ContactExchange.kt`'s own doc comment) was already fixed
+   to 32-byte raw in Run 12. Two peers computing a safety number would hash
+   different-length local vs. remote representations and never match. **Fixed:**
+   switched to `getPublicKeyBytes()`, matching the QR/wire representation. This
+   was Run 12's own deferred item; the reviewers were right that leaving it was
+   an immediately-reachable bug in the same file, not genuinely out of scope.
+
+2. **`establishSession()` still decodes via `Curve.decodePoint`/
+   `IdentityKey(byte[])` (Codex, P1, flagged twice/duplicated).** These expect
+   libsignal's type-prefixed `serialize()` form, but `GET
+   /api/v1/users/:id/prekey` (and the DTOs feeding it) now carry the server's
+   raw 32-byte wire form end to end. Unfixed, the very first message to any
+   newly-registered peer would fail to build a session. **Fixed:** switched to
+   `ECPublicKey.fromPublicKeyBytes(decode(...))` (confirmed via `javap` as the
+   raw-bytes counterpart to `getPublicKeyBytes()` — same static-factory pattern
+   already relied on in Run 12) for the identity key, signed prekey, and
+   one-time prekey in `PreKeyBundle` construction.
+
+3. **Signed-prekey signature was covering the wrong representation (Codex,
+   P1).** Run 12 signed the raw 32-byte `getPublicKeyBytes()` form to match what
+   was uploaded — reasoning that the (still-broken) server verification would
+   eventually need the same bytes it stores. Codex correctly pointed out this
+   breaks the OTHER consumer of that signature: a receiving peer's
+   `SessionBuilder.process()` reconstructs an `ECPublicKey` from the bundle and
+   verifies the signature against **its `serialize()` output** (33 bytes) — the
+   standard, unmodified libsignal/Signal-protocol convention. Signing the raw
+   32-byte form would satisfy a server that verifies raw bytes but break every
+   peer-to-peer session; signing `serialize()` (the original, pre-Run-12
+   convention) satisfies peer-to-peer but conflicts with a server that naively
+   verifies the raw upload bytes.
+   **Resolution:** reverted to signing `keyPair.publicKey.serialize()` (33
+   bytes) — restores peer-to-peer correctness — while the wire `public_key`
+   field stays the raw 32-byte `getPublicKeyBytes()` form the server's length
+   check requires. **This refines the Bug 2 guidance left for the maintainer in
+   Run 12's todos.md item:** the server's future XEdDSA verification fix must
+   reconstruct the 33-byte serialize() form (prepend the constant DJB type byte,
+   `0x05` for Curve25519) from its stored 32-byte key before verifying —
+   verifying against the raw 32-byte form directly, even with correct XEdDSA
+   math, would reject every valid signature, since that's not the message that
+   was actually signed. `todos.md` updated to say this explicitly.
+   **Verified the fix is internally consistent**, not just reasoned about:
+   generated a real identity+signed-prekey pair, signed `serialize()`, derived
+   the raw 32-byte wire form, reconstructed via `ECPublicKey.fromPublicKeyBytes`
+   (the same call `establishSession()` now makes), and confirmed (a) the
+   reconstructed point's `serialize()` byte-for-byte equals the original, and
+   (b) `verifySignature()` on the reconstructed point's `serialize()` succeeds —
+   i.e. Run 12's upload fix + this run's `establishSession()` fix + this run's
+   signing-representation fix are mutually consistent for the peer-to-peer path.
+   Harness kept at `/tmp/.../xeddsa_test/RoundTrip.java` this session, not
+   committed (scratch, not project code).
+
+4. **`ApiException.responseBody` KDoc overclaimed safety (Copilot).** Reworded
+   from "always safe" to "untrusted, length-capped, single-line-sanitized
+   preview" — the guarantee is the cap/sanitization, not an assumption the
+   server always behaves.
+5. **Unbounded body read before capping (Copilot).** `execute()`'s failure path
+   used `response.body.string()` (reads the full body regardless of size) and
+   capped only afterward. Switched to `response.peekBody(MAX_ERROR_BODY_BYTES)`
+   so a misbehaving/hostile server can't force a large read into memory. Success
+   path unchanged (still needs the full body to parse JSON) — this cap is
+   specifically for the untrusted-error-body case Copilot flagged.
+6. **Multi-line error body could break the single-line diagnostics format
+   (Gemini, medium).** Added `.replace('\n',' ').replace('\r',' ')` before the
+   char cap, per Gemini's suggested diff.
+
+### NOT done — no write access to post replies
+
+`gh` isn't installed in this environment, and per `constraints.md` GitHub PATs
+are an operator-only credential — didn't reach for `.env` to work around that.
+So these fixes are pushed as a new commit on PR #21 but no reply comments were
+posted acknowledging each reviewer thread; the operator/maintainer will see the
+fix commit but may want to manually resolve/reply to the threads.
+
+### Tests run / Verification
+
+- `./gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL (8s).
+- `./gradlew :app:testDebugUnitTest` — BUILD SUCCESSFUL (7s), no regressions.
+- Standalone round-trip check (libsignal jar via `javap`-confirmed API, see
+  finding 3 above) — both assertions passed.
+- Still NOT done: an actual on-device registration + first-message send. This
+  environment cannot build a signed APK or run a device/emulator; Bug 2
+  (server-side) also still blocks registration from succeeding at all. See
+  Run 12 for the same caveat.
+
+### Next action
+
+Unchanged from Run 12: maintainer implements the server-side XEdDSA
+verification fix (now with the refined "reconstruct serialize() before
+verifying" guidance above), then an operator does an actual on-device
+registration + two-peer message test before this is considered closed.
+
 ## Run 11 — On-device (adb-free) connection diagnostics for v1.5.3 (2026-07-15)
 
 Branch: `claude/android-registration-tracing-2b7du2` (restarted from `origin/main`

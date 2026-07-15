@@ -201,9 +201,16 @@ class MessagingCoordinator(
                 // common" / a TLS-version complaint points at the TLS-1.3-only
                 // ConnectionSpec vs. the server's negotiation; Connect/
                 // UnknownHost points at the relay simply being unreachable.
+                // ApiException.responseBody, when present, is the server's
+                // {"error": "<code>"} schema-validation reason (e.g.
+                // "bad_identity_key") — the single most useful line for
+                // diagnosing a register/session 400 without a second machine.
+                val bodySuffix = (e as? ApiClient.ApiException)?.responseBody
+                    ?.let { " server_error=$it" }
+                    .orEmpty()
                 diag(
                     "boot[$attempt]: failed at stage=$stage: " +
-                        "${e.javaClass.name}: ${e.message}",
+                        "${e.javaClass.name}: ${e.message}$bodySuffix",
                 )
             }.isSuccess
             if (ok) {
