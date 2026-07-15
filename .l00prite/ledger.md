@@ -1368,6 +1368,110 @@ Recorded here per the task's own ask; not actioned this run.
    release/signing/publish step — see todos.md "Next" for why, and for the
    deferred `establishSession`/safety-number follow-up.
 
+## Run 13 — PR #21 automated review response: fixed the deferred `establishSession`/safety-number gap and corrected the signed-prekey signing representation (2026-07-15)
+
+Branch: `claude/android-register-key-encoding` (same branch as Run 12, now
+pushed and opened as PR #21). Trigger: user asked to check PR comments and push
+necessary fixes. Three automated reviewers (Gemini Code Assist, GitHub Copilot,
+ChatGPT/Codex) left inline comments on PR #21's first commit (`82715a0`).
+
+### Review findings, and what was done about each
+
+1. **`localIdentityPublicKeyBytes()` still 33-byte `serialize()` — flagged by
+   all three reviewers (Gemini: high; Copilot; Codex: P2).** Used by
+   `safetyNumberWith()`/`localFingerprint()`, while
+   `localIdentityPublicKeyBase64()` (register upload, QR/`ContactExchangePayload`
+   per `ui/components/ContactExchange.kt`'s own doc comment) was already fixed
+   to 32-byte raw in Run 12. Two peers computing a safety number would hash
+   different-length local vs. remote representations and never match. **Fixed:**
+   switched to `getPublicKeyBytes()`, matching the QR/wire representation. This
+   was Run 12's own deferred item; the reviewers were right that leaving it was
+   an immediately-reachable bug in the same file, not genuinely out of scope.
+
+2. **`establishSession()` still decodes via `Curve.decodePoint`/
+   `IdentityKey(byte[])` (Codex, P1, flagged twice/duplicated).** These expect
+   libsignal's type-prefixed `serialize()` form, but `GET
+   /api/v1/users/:id/prekey` (and the DTOs feeding it) now carry the server's
+   raw 32-byte wire form end to end. Unfixed, the very first message to any
+   newly-registered peer would fail to build a session. **Fixed:** switched to
+   `ECPublicKey.fromPublicKeyBytes(decode(...))` (confirmed via `javap` as the
+   raw-bytes counterpart to `getPublicKeyBytes()` — same static-factory pattern
+   already relied on in Run 12) for the identity key, signed prekey, and
+   one-time prekey in `PreKeyBundle` construction.
+
+3. **Signed-prekey signature was covering the wrong representation (Codex,
+   P1).** Run 12 signed the raw 32-byte `getPublicKeyBytes()` form to match what
+   was uploaded — reasoning that the (still-broken) server verification would
+   eventually need the same bytes it stores. Codex correctly pointed out this
+   breaks the OTHER consumer of that signature: a receiving peer's
+   `SessionBuilder.process()` reconstructs an `ECPublicKey` from the bundle and
+   verifies the signature against **its `serialize()` output** (33 bytes) — the
+   standard, unmodified libsignal/Signal-protocol convention. Signing the raw
+   32-byte form would satisfy a server that verifies raw bytes but break every
+   peer-to-peer session; signing `serialize()` (the original, pre-Run-12
+   convention) satisfies peer-to-peer but conflicts with a server that naively
+   verifies the raw upload bytes.
+   **Resolution:** reverted to signing `keyPair.publicKey.serialize()` (33
+   bytes) — restores peer-to-peer correctness — while the wire `public_key`
+   field stays the raw 32-byte `getPublicKeyBytes()` form the server's length
+   check requires. **This refines the Bug 2 guidance left for the maintainer in
+   Run 12's todos.md item:** the server's future XEdDSA verification fix must
+   reconstruct the 33-byte serialize() form (prepend the constant DJB type byte,
+   `0x05` for Curve25519) from its stored 32-byte key before verifying —
+   verifying against the raw 32-byte form directly, even with correct XEdDSA
+   math, would reject every valid signature, since that's not the message that
+   was actually signed. `todos.md` updated to say this explicitly.
+   **Verified the fix is internally consistent**, not just reasoned about:
+   generated a real identity+signed-prekey pair, signed `serialize()`, derived
+   the raw 32-byte wire form, reconstructed via `ECPublicKey.fromPublicKeyBytes`
+   (the same call `establishSession()` now makes), and confirmed (a) the
+   reconstructed point's `serialize()` byte-for-byte equals the original, and
+   (b) `verifySignature()` on the reconstructed point's `serialize()` succeeds —
+   i.e. Run 12's upload fix + this run's `establishSession()` fix + this run's
+   signing-representation fix are mutually consistent for the peer-to-peer path.
+   Harness kept at `/tmp/.../xeddsa_test/RoundTrip.java` this session, not
+   committed (scratch, not project code).
+
+4. **`ApiException.responseBody` KDoc overclaimed safety (Copilot).** Reworded
+   from "always safe" to "untrusted, length-capped, single-line-sanitized
+   preview" — the guarantee is the cap/sanitization, not an assumption the
+   server always behaves.
+5. **Unbounded body read before capping (Copilot).** `execute()`'s failure path
+   used `response.body.string()` (reads the full body regardless of size) and
+   capped only afterward. Switched to `response.peekBody(MAX_ERROR_BODY_BYTES)`
+   so a misbehaving/hostile server can't force a large read into memory. Success
+   path unchanged (still needs the full body to parse JSON) — this cap is
+   specifically for the untrusted-error-body case Copilot flagged.
+6. **Multi-line error body could break the single-line diagnostics format
+   (Gemini, medium).** Added `.replace('\n',' ').replace('\r',' ')` before the
+   char cap, per Gemini's suggested diff.
+
+### NOT done — no write access to post replies
+
+`gh` isn't installed in this environment, and per `constraints.md` GitHub PATs
+are an operator-only credential — didn't reach for `.env` to work around that.
+So these fixes are pushed as a new commit on PR #21 but no reply comments were
+posted acknowledging each reviewer thread; the operator/maintainer will see the
+fix commit but may want to manually resolve/reply to the threads.
+
+### Tests run / Verification
+
+- `./gradlew :app:compileDebugKotlin` — BUILD SUCCESSFUL (8s).
+- `./gradlew :app:testDebugUnitTest` — BUILD SUCCESSFUL (7s), no regressions.
+- Standalone round-trip check (libsignal jar via `javap`-confirmed API, see
+  finding 3 above) — both assertions passed.
+- Still NOT done: an actual on-device registration + first-message send. This
+  environment cannot build a signed APK or run a device/emulator; Bug 2
+  (server-side) also still blocks registration from succeeding at all. See
+  Run 12 for the same caveat.
+
+### Next action
+
+Unchanged from Run 12: maintainer implements the server-side XEdDSA
+verification fix (now with the refined "reconstruct serialize() before
+verifying" guidance above), then an operator does an actual on-device
+registration + two-peer message test before this is considered closed.
+
 ## Run 11 — On-device (adb-free) connection diagnostics for v1.5.3 (2026-07-15)
 
 Branch: `claude/android-registration-tracing-2b7du2` (restarted from `origin/main`

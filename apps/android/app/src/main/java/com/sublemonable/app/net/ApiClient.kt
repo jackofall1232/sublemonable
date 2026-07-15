@@ -50,11 +50,14 @@ class ApiClient(
     val accountIdFlow: StateFlow<String?> = _accountId.asStateFlow()
 
     /**
-     * [responseBody] is the server's error payload on a non-2xx response —
-     * always one of the small, fixed `{"error": "<code>"}` validation codes
-     * from the server's `errJSON` helper (see internal/api/handlers.go),
-     * never request/response data that could contain user content. Safe to
-     * surface in diagnostics.
+     * [responseBody] is an untrusted, length-capped, single-line-sanitized
+     * preview of the server's error payload on a non-2xx response. In
+     * practice this server always returns a small `{"error": "<code>"}`
+     * validation code (see `errJSON` in internal/api/handlers.go) and never
+     * request/response data that could contain user content — but the cap
+     * and sanitization below don't assume that; a compromised or fronting
+     * server returning something else can't blow up diagnostics or break its
+     * single-line log format.
      */
     class ApiException(val code: Int, message: String, val responseBody: String? = null) : IOException(message)
 
@@ -242,22 +245,25 @@ class ApiClient(
 
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
-                        val text = it.body?.string().orEmpty()
                         if (!it.isSuccessful) {
-                            // Body capped defensively even though the server's
-                            // error responses are always a short fixed-vocabulary
-                            // code — never assume a well-behaved server.
+                            // peekBody, not body.string(): caps how much of a
+                            // misbehaving (or malicious) server's response we
+                            // ever read into memory, regardless of the
+                            // Content-Length it claims. Newlines are stripped
+                            // so a multi-line body (e.g. an HTML error page
+                            // from a fronting proxy) can't break the
+                            // single-line diagnostics log format.
+                            val preview = it.peekBody(MAX_ERROR_BODY_BYTES).string()
+                                .replace('\n', ' ').replace('\r', ' ')
+                                .take(MAX_ERROR_BODY_CHARS).ifBlank { null }
                             if (continuation.isActive) {
                                 continuation.resumeWithException(
-                                    ApiException(
-                                        it.code,
-                                        "HTTP ${it.code}",
-                                        text.take(MAX_ERROR_BODY_CHARS).ifBlank { null },
-                                    ),
+                                    ApiException(it.code, "HTTP ${it.code}", preview),
                                 )
                             }
                             return
                         }
+                        val text = it.body?.string().orEmpty()
                         val json = if (text.isBlank()) JSONObject() else JSONObject(text)
                         if (continuation.isActive) continuation.resume(json)
                     }
@@ -282,6 +288,9 @@ class ApiClient(
 
         /** Defensive cap on the error body surfaced in [ApiException.responseBody]. */
         private const val MAX_ERROR_BODY_CHARS = 200
+
+        /** Bytes peeked from a non-2xx body — bounds memory before the char cap applies. */
+        private const val MAX_ERROR_BODY_BYTES = 4096L
 
         private const val KEY_ACCOUNT_ID = "account_id"
         private const val KEY_ACCESS_TOKEN = "access_token"

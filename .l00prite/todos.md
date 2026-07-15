@@ -18,6 +18,15 @@
       not yet a dependency) and test against a live device. Full trace, the
       empirical method, and why this blocks registration end-to-end even after
       the wire-format fix below: `.l00prite/ledger.md` Run 12.
+      - **Refined in Run 13:** the signed-prekey signature is (deliberately)
+        computed over the 33-byte libsignal `serialize()` form, NOT the raw
+        32-byte wire form — peer-to-peer `SessionBuilder.process()` requires
+        this (see Run 13). So the server-side verification fix must
+        **reconstruct** the 33-byte form (prepend the constant DJB type byte,
+        `0x05` for Curve25519, to the stored/uploaded 32-byte key) before
+        running XEdDSA verification — verifying against the raw 32-byte form
+        directly, even with otherwise-correct Montgomery→Edwards math, will
+        reject every valid signature.
       - The client-side half of the same bug (registration uploaded 33-byte
         libsignal-`serialize()` keys against a server that requires raw 32-byte
         keys) IS fixed on `claude/android-register-key-encoding`
@@ -30,15 +39,11 @@
         shipped" as evidence it works, per Run 12's finding that no platform's
         register call has ever been confirmed round-tripping against the real
         Go server.
-- [ ] **Follow-up, same bug class as Run 12, deliberately not fixed there:**
-      `SignalProtocolManager.establishSession()` (X3DH prekey-bundle consumption,
-      `GET /api/v1/users/:id/prekey`) and `localIdentityPublicKeyBytes()`
-      (safety numbers / fingerprint) still decode/encode via the type-prefixed
-      `Curve.decodePoint` / `IdentityKey(byte[])` / `serialize()` path, not
-      `getPublicKeyBytes()`. Not reachable during boot/registration, so out of
-      scope for Run 12's fix, but it's the same 32-vs-33-byte mismatch and will
-      surface as soon as two registered accounts try to message each other or
-      compare safety numbers.
+- [x] ~~`SignalProtocolManager.establishSession()` and
+      `localIdentityPublicKeyBytes()` still use the type-prefixed decode/encode
+      path~~ — **fixed in Run 13** (PR #21 review response): both now use
+      `ECPublicKey.fromPublicKeyBytes()` / `getPublicKeyBytes()` consistently
+      with the raw 32-byte wire form. See ledger Run 13.
 - [ ] **Structural risk (flagged, not actioned):** client and server each define
       the registration/auth wire contract independently, with no shared
       schema/spec either side validates against — this exact class of drift

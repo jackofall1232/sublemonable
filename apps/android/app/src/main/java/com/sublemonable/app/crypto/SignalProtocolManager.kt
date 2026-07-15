@@ -12,6 +12,7 @@ import org.signal.libsignal.protocol.SessionBuilder
 import org.signal.libsignal.protocol.SessionCipher
 import org.signal.libsignal.protocol.SignalProtocolAddress
 import org.signal.libsignal.protocol.ecc.Curve
+import org.signal.libsignal.protocol.ecc.ECPublicKey
 import org.signal.libsignal.protocol.message.CiphertextMessage
 import org.signal.libsignal.protocol.message.PreKeySignalMessage
 import org.signal.libsignal.protocol.message.SignalMessage
@@ -95,8 +96,12 @@ class SignalProtocolManager(
         return encode(identityKey.publicKey.getPublicKeyBytes())
     }
 
+    // Raw 32-byte form — matches localIdentityPublicKeyBase64() above, and the
+    // wire representation contacts receive via ContactExchangePayload / the
+    // server, so safetyNumberWith()/localFingerprint() compare the same byte
+    // representation on both sides (review: Gemini/Copilot/Codex on PR #21).
     fun localIdentityPublicKeyBytes(): ByteArray =
-        store.getIdentityKeyPair().publicKey.serialize()
+        store.getIdentityKeyPair().publicKey.publicKey.getPublicKeyBytes()
 
     /**
      * Signs the timestamped login challenge with the identity key (XEdDSA
@@ -118,20 +123,27 @@ class SignalProtocolManager(
     fun generateSignedPreKey(): SignedPreKeyDto {
         val id = nextId(KEY_NEXT_SIGNED_PREKEY_ID)
         val keyPair = Curve.generateKeyPair()
-        // Sign the same raw 32-byte form that goes out over the wire (below) —
-        // signing serialize()'s 33-byte, type-prefixed form here while uploading
-        // the 32-byte form would make the signature unverifiable server-side.
-        val rawPublicKey = keyPair.publicKey.getPublicKeyBytes()
+        // Sign the standard libsignal serialize() form (33 bytes, DJB
+        // type-prefixed), NOT the raw 32-byte wire form uploaded below.
+        // SessionBuilder.process() on a receiving peer reconstructs an
+        // ECPublicKey from the bundle and verifies the signature against
+        // ITS serialize() output, so the signed message must stay in that
+        // representation for peer-to-peer X3DH to work (review: Codex on
+        // PR #21). The wire `public_key` can still be the raw 32-byte form
+        // the server requires — establishSession() below re-derives the
+        // same 33-byte point from it before verification, and a future
+        // server-side signature check must do the same reconstruction
+        // rather than verifying against the raw bytes directly.
         val signature = Curve.calculateSignature(
             store.getIdentityKeyPair().privateKey,
-            rawPublicKey,
+            keyPair.publicKey.serialize(),
         )
         val timestamp = System.currentTimeMillis()
         store.storeSignedPreKey(id, SignedPreKeyRecord(id, timestamp, keyPair, signature))
         prefs.edit().putLong(KEY_SIGNED_PREKEY_CREATED_AT, timestamp).apply()
         return SignedPreKeyDto(
             id = id,
-            publicKeyBase64 = encode(rawPublicKey),
+            publicKeyBase64 = encode(keyPair.publicKey.getPublicKeyBytes()),
             signatureBase64 = encode(signature),
             timestampMs = timestamp,
         )
@@ -168,17 +180,24 @@ class SignalProtocolManager(
      * X3DH: establishes an outbound session from a prekey bundle fetched via
      * GET /api/v1/users/:id/prekey. After this, [encrypt] produces a
      * PreKeySignalMessage until the first round trip completes the ratchet.
+     *
+     * The bundle's keys are the server's raw 32-byte wire form (no DJB
+     * type-prefix byte — see localIdentityPublicKeyBase64()), so they're
+     * decoded via [ECPublicKey.fromPublicKeyBytes], NOT [Curve.decodePoint]/
+     * [IdentityKey]'s byte-array constructor, both of which expect libsignal's
+     * type-prefixed serialize() form. Getting this wrong would silently break
+     * every first message to a newly registered peer (review: Codex on PR #21).
      */
     fun establishSession(remoteAccountId: String, bundle: PreKeyBundleDto) {
         val preKeyBundle = PreKeyBundle(
             bundle.registrationId,
             bundle.deviceId,
             bundle.preKeyId ?: -1,
-            bundle.preKeyBase64?.let { Curve.decodePoint(decode(it), 0) },
+            bundle.preKeyBase64?.let { ECPublicKey.fromPublicKeyBytes(decode(it)) },
             bundle.signedPreKeyId,
-            Curve.decodePoint(decode(bundle.signedPreKeyBase64), 0),
+            ECPublicKey.fromPublicKeyBytes(decode(bundle.signedPreKeyBase64)),
             decode(bundle.signedPreKeySignatureBase64),
-            IdentityKey(decode(bundle.identityKeyBase64)),
+            IdentityKey(ECPublicKey.fromPublicKeyBytes(decode(bundle.identityKeyBase64))),
         )
         SessionBuilder(store, address(remoteAccountId)).process(preKeyBundle)
     }
