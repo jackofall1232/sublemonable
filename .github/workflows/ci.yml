@@ -79,9 +79,14 @@ jobs:
         # androidx.compose.ui.platform.AndroidCompositionLocals_androidKt.
         # If R8 ever strips/renames it again, any lifecycle-compose API would
         # crash on first composition in release builds only (v1.5.1 Settings bug).
+        shell: bash
         run: |
-          unzip -p app/build/outputs/apk/release/app-release-unsigned.apk 'classes*.dex' \
-            | grep -aq 'Landroidx/compose/ui/platform/AndroidCompositionLocals_androidKt;' \
+          apk=app/build/outputs/apk/release/app-release-unsigned.apk
+          [ -f "$apk" ] || { echo "Release APK not found at $apk — output path changed?"; exit 1; }
+          # Extract before grepping so an unzip failure reports as itself
+          # instead of masquerading as a stripped-class finding.
+          unzip -o -q "$apk" 'classes*.dex' -d r8check
+          grep -aq 'Landroidx/compose/ui/platform/AndroidCompositionLocals_androidKt;' r8check/classes*.dex \
             || { echo 'R8 stripped AndroidCompositionLocals_androidKt — lifecycle-compose APIs would crash in release builds (see v1.5.1 Settings crash)'; exit 1; }
 
   desktop-linux:
