@@ -2,6 +2,22 @@
 
 ## Next
 
+- [ ] **Android transport hardening (follow-up, deliberately OUT of scope for the
+      registration-tracing PR #19).** Two gaps surfaced while tracing the boot path;
+      both are separate, larger pieces of work than that PR should carry:
+      - `TorIntegration.socksProxy()` hardcodes Orbot at `127.0.0.1:9050` and never
+        verifies Orbot's *actual* SOCKS port or bootstrap status before routing the
+        OkHttp client through it. If Orbot uses a non-default port, isn't finished
+        bootstrapping, or isn't actually running, the register/session calls fail
+        silently exactly like any other transport failure. Needs Orbot status/port
+        discovery (Orbot's `ACTION_STATUS` broadcast + `org.torproject.android.intent.extra.STATUS`)
+        before enabling the proxy, and a distinct failure surface when Tor is
+        selected but unusable.
+      - Android I2P is an unimplemented skeleton (`TransportState.I2P` is defined but
+        "never emitted"; no router SDK). Any device-side "I2P active" state is
+        irrelevant to the Android client today — it dials clearnet (or Orbot-Tor if
+        the toggle is on), never I2P. Tracked more broadly under "In-process I2P on
+        mobile" below; noted here so the registration-path context isn't lost.
 - [ ] **CI-verify the Android UI-wiring branch (`claude/l00prite-android-ui-wiring-58wvq6`).**
       That session had no Android SDK, so nothing was built. Before merge, run the Android CI
       job: Gradle assemble + `:app:testDebugUnitTest` (incl. new `ContactExchangeTest`), and

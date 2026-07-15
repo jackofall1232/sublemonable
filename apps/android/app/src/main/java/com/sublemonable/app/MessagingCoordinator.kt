@@ -47,13 +47,15 @@ import kotlin.math.min
  * account unregistered and offline forever (see [start]).
  *
  * The ONE exception to the no-logging rule is boot-stage transport
- * diagnostics in [bootstrapLoop]: stage names and transport exception
- * class/message only (connect errors, HTTP status codes, certificate-pin
- * mismatches). No message content, keys, tokens, account ids, or envelope
- * fields ever flow through those exceptions, so nothing sensitive can leak
- * into logcat. Without it, a certificate-pinning failure or a dead relay is
- * indistinguishable from airplane mode — the app retries forever with no
- * signal anywhere, client or server.
+ * diagnostics in [bootstrapLoop]: fixed stage/milestone markers (e.g.
+ * "firing POST /api/v1/register", "session minted") and the transport
+ * exception class/message on failure (connect errors, HTTP status codes,
+ * certificate-pin mismatches). All of these strings are compile-time
+ * constants or exception metadata — no message content, keys, tokens,
+ * account ids, or envelope fields ever flow through them, so nothing
+ * sensitive can leak into logcat. Without it, a certificate-pinning failure
+ * or a dead relay is indistinguishable from airplane mode — the app retries
+ * forever with no signal anywhere, client or server.
  */
 class MessagingCoordinator(
     private val appContext: Context,
@@ -197,7 +199,13 @@ class MessagingCoordinator(
                 )
             }.isSuccess
             if (ok) {
-                Log.w(TAG, "boot[$attempt]: online — session minted, socket connected")
+                // ws.connect() only enqueues the socket open; the real
+                // CONNECTED/DISCONNECTED transition (and any /ws handshake
+                // failure) is delivered asynchronously via ws.connectionState,
+                // which drives the UI connectivity badge — NOT observed here.
+                // So this marks the boot chain reaching a live session and
+                // handing the socket off, not a confirmed-open socket.
+                Log.w(TAG, "boot[$attempt]: session minted, socket handshake handed off")
                 // Reaching a live socket IS success. Signed-prekey rotation is
                 // best-effort and must NOT fail the boot — a failed upload here
                 // would otherwise tear down the healthy socket on the next

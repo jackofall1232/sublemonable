@@ -42,16 +42,18 @@
     public static *** getLocalLifecycleOwner();
 }
 
-# No debug/info logging in release: strip stray android.util.Log calls
-# defensively. (The codebase contains none by policy, this enforces it at
-# build time.) Warning/error levels are deliberately NOT stripped: the boot
-# transport diagnostics in MessagingCoordinator (tag "SublemonableBoot") log
-# at Log.w — stage names + transport exception text only, never user data —
-# and stripping them made a certificate-pinning failure or dead relay
-# completely unobservable in release builds (no client log, no server
-# contact), which is exactly the failure mode they exist to diagnose.
+# Release logging policy: strip verbose/debug/info AND wtf defensively (the
+# codebase uses none by policy; wtf in particular is noisy and can trigger
+# extra platform reporting). ONLY Log.w / Log.e survive minification — and
+# deliberately so: the boot transport diagnostics in MessagingCoordinator
+# (tag "SublemonableBoot") log at Log.w — fixed stage/milestone markers +
+# transport exception text only, never user data — and stripping them made a
+# certificate-pinning failure or dead relay completely unobservable in release
+# builds (no client log, no server contact), which is exactly the failure mode
+# they exist to diagnose.
 -assumenosideeffects class android.util.Log {
     public static int v(...);
     public static int d(...);
     public static int i(...);
+    public static int wtf(...);
 }
