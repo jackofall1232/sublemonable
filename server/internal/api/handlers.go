@@ -86,6 +86,22 @@ func errJSON(c *fiber.Ctx, status int, code string) error {
 	return c.Status(status).JSON(fiber.Map{"error": code})
 }
 
+// djbType is libsignal's Curve25519 key-type tag (Curve.DJB_TYPE on Android/
+// iOS clients). Clients sign a signed prekey's full libsignal serialize()
+// form (this tag byte + the 32-byte public key) with their identity key, NOT
+// the raw 32-byte wire form stored/transmitted here — a receiving peer's
+// SessionBuilder reconstructs and verifies against that same serialized form
+// (see apps/android SignalProtocolManager.kt, Run 13). So the server must
+// reconstruct it the same way before verifying, or every valid signature
+// will be rejected as invalid (see .l00prite/ledger.md Run 12/14).
+const djbType = 0x05
+
+// signedPrekeyMessage reconstructs the exact byte string a client signed for
+// a signed prekey, from the raw 32-byte wire form.
+func signedPrekeyMessage(rawPublicKey []byte) []byte {
+	return append([]byte{djbType}, rawPublicKey...)
+}
+
 // ── registration ─────────────────────────────────────────────────────────────
 
 type prekeyJSON struct {
@@ -121,8 +137,10 @@ func (h *Handlers) Register(c *fiber.Ctx) error {
 		return errJSON(c, fiber.StatusBadRequest, "bad_signed_prekey")
 	}
 	// The server verifies the prekey signature too — a malformed bundle should
-	// never be servable to other clients.
-	if !ed25519.Verify(identityKey, spkPub, spkSig) {
+	// never be servable to other clients. Identity keys are Curve25519,
+	// signed with libsignal's XEdDSA scheme (see auth.VerifyXEdDSA) — not
+	// plain Ed25519.
+	if !auth.VerifyXEdDSA(identityKey, signedPrekeyMessage(spkPub), spkSig) {
 		return errJSON(c, fiber.StatusBadRequest, "bad_prekey_signature")
 	}
 
@@ -290,7 +308,8 @@ func (h *Handlers) UploadPrekeys(c *fiber.Ctx) error {
 		}
 		pub, err1 := base64.StdEncoding.DecodeString(req.SignedPrekey.PublicKey)
 		sig, err2 := base64.StdEncoding.DecodeString(req.SignedPrekey.Signature)
-		if err1 != nil || err2 != nil || len(pub) != 32 || !ed25519.Verify(identityKey, pub, sig) {
+		if err1 != nil || err2 != nil || len(pub) != 32 ||
+			!auth.VerifyXEdDSA(identityKey, signedPrekeyMessage(pub), sig) {
 			return errJSON(c, fiber.StatusBadRequest, "bad_signed_prekey")
 		}
 		if err := h.store.UpsertSignedPrekey(ctx, accountID, req.SignedPrekey.ID, pub, sig); err != nil {

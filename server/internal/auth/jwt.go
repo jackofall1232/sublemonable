@@ -81,7 +81,9 @@ func LoginMessage(accountID uuid.UUID, timestamp time.Time) []byte {
 	return []byte(fmt.Sprintf("sublemonable-login:%s:%d", accountID, timestamp.Unix()))
 }
 
-// VerifyLogin checks the timestamp window and the Ed25519 signature.
+// VerifyLogin checks the timestamp window and the XEdDSA signature over the
+// login challenge (see VerifyXEdDSA — identity keys are Curve25519, signed
+// with libsignal's XEdDSA scheme, not plain Ed25519).
 func VerifyLogin(identityKey []byte, accountID uuid.UUID, timestamp time.Time, signature []byte, now time.Time) error {
 	if len(identityKey) != ed25519.PublicKeySize {
 		return fmt.Errorf("bad identity key length")
@@ -90,7 +92,7 @@ func VerifyLogin(identityKey []byte, accountID uuid.UUID, timestamp time.Time, s
 	if drift < -LoginSkew || drift > LoginSkew {
 		return fmt.Errorf("login timestamp outside window")
 	}
-	if !ed25519.Verify(identityKey, LoginMessage(accountID, timestamp), signature) {
+	if !VerifyXEdDSA(identityKey, LoginMessage(accountID, timestamp), signature) {
 		return fmt.Errorf("signature verification failed")
 	}
 	return nil

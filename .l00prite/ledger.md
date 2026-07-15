@@ -1472,6 +1472,166 @@ verification fix (now with the refined "reconstruct serialize() before
 verifying" guidance above), then an operator does an actual on-device
 registration + two-peer message test before this is considered closed.
 
+## Run 14 — Server-side XEdDSA fix implemented and empirically validated, then BLOCKED before deploy: web/desktop uses genuine Ed25519, not libsignal — a single-scheme fix regresses a currently-working surface (2026-07-15)
+
+This run had direct access to the production box (this environment's own IP,
+178.104.19.240, IS `relay.sublemonable.com` — confirmed via `docker inspect`/
+`hostname -I`/matching `/healthz` responses; `sublemonable-server-1`,
+`-postgres-1`, `-tor-1`, `-i2p-1` are the live containers) and outbound egress
+that was blocked in Run 10 now works. Maintainer decision going in: fix the
+SERVER to verify XEdDSA (not the client to sign plain Ed25519), because "the
+app is built on libsignal-client... XEdDSA is the standard signing scheme...
+would create inconsistency with iOS/desktop clients that will also use
+libsignal-client."
+
+### Implemented, tested, NOT deployed
+
+- **`server/internal/auth/xeddsa.go`** — `VerifyXEdDSA(pub, message, sig)`.
+  Hand-deriving the Montgomery→Edwards conversion from memory FAILED
+  empirically first (see below) despite the core formula checking out against
+  a known reference point — the missing piece was that XEdDSA smuggles the
+  Edwards public key's sign bit through the otherwise-unused top bit of the
+  signature's `s` value (`sig[63] & 0x80`) instead of forcing it to 0, which
+  isn't obvious from the textbook birational-map description alone. Ported
+  (with attribution) from `go.mau.fi/libsignal`'s `ecc.verify` (GPLv3) — a Go
+  reimplementation used in production by Signal-protocol bridges that
+  interoperate with real clients — rather than continuing to hand-roll a
+  security-critical primitive. New dependency: `filippo.io/edwards25519`
+  (MIT) for field arithmetic; go.mod diff is exactly one line.
+  **License note for the maintainer:** the ported ~25 lines of verify logic
+  are GPLv3-derived; combining GPLv3 code into this AGPL-3.0-only project is a
+  standard, FSF-documented compatible combination (the distributed whole
+  satisfies AGPL-3.0, which is a superset of GPLv3's terms here), but it's a
+  new fact about the codebase worth the maintainer knowing, not something to
+  bury in a commit.
+- **Empirical validation before writing any Go**, per this session's own
+  standing discipline: generated real signature vectors with the vendored
+  libsignal-client-0.46.0.jar (`IdentityKeyPair.generate()` +
+  `Curve.calculateSignature()` — literally the client's own code path) for
+  both message shapes the server verifies (the login-challenge string, and
+  the signed-prekey's 33-byte `serialize()` form), first proved the ported
+  Go `verify()` accepts both and correctly rejects a bit-flipped signature
+  and the wrong (unprefixed, 32-byte) message — all four outcomes matched
+  expectations exactly, via a throwaway `go run` in the golang:1.25 Docker
+  image (no native Go toolchain on this box; Docker supplies one).
+- **Wired into all three call sites** (confirmed by grep to be the ONLY
+  identity-key signature checks in `server/`; JWT access tokens are RS256/
+  RSA and PoW/relay-onion code have no `ed25519` references — untouched):
+  `Register`'s and `UploadPrekeys`' signed-prekey checks (via a new
+  `signedPrekeyMessage()` helper that reconstructs the 33-byte form —
+  `internal/api/handlers.go`), and `VerifyLogin` (`internal/auth/jwt.go`).
+- **Go tests** (`internal/auth/xeddsa_test.go`, `jwt_test.go`): hardcoded real
+  libsignal-generated `(pubkey, message, sig)` vectors as the positive cases —
+  deliberately not self-generated with `ed25519.Sign`/a Go-side signer, since
+  a bug in the conversion could otherwise pass its own test by construction.
+  Negative cases: bit-flipped signature, wrong message, wrong key, the
+  unprefixed-message case (proves `signedPrekeyMessage()`'s 0x05 prepend is
+  load-bearing, not decorative), and malformed key/signature lengths.
+  `jwt_test.go`'s pre-existing `TestLoginChallenge` also switched from
+  `ed25519.GenerateKey`/`ed25519.Sign` to real vectors for the same reason.
+- **Full CI-equivalent check, via `golang:1.25` in Docker** (this box has no
+  native `go`): `go vet ./...`, `go build ./...`, `go test -race ./...`,
+  `gofmt -l .` — all clean.
+
+### BLOCKED before deploy — the maintainer's premise doesn't hold for one platform
+
+While preparing the end-to-end test, re-read `packages/crypto/src/keys.ts`
+(the shared crypto package `apps/web` uses — and, per `blueprint.md`, so does
+`apps/desktop`, which wraps `apps/web` in a Tauri WebView; only the
+transport is native Rust there, not the identity-key crypto). It does NOT use
+libsignal or XEdDSA:
+
+```
+generateIdentityKeyPair(): sodium.crypto_sign_keypair()        // genuine Ed25519
+verifySignedPrekey(...):    sodium.crypto_sign_verify_detached // genuine Ed25519
+signWithIdentity(...):      sodium.crypto_sign_detached        // genuine Ed25519
+```
+
+`apps/web/src/store.ts:430` publishes `identity_key: b64(identity.publicKey)`
+— the raw genuine-Ed25519 public key, not a Curve25519 u-coordinate. The
+X25519 form (`identityKeyToX25519`, via `crypto_sign_ed25519_pk_to_curve25519`)
+exists ONLY for X3DH's DH step, never for signing or for what's published as
+`identity_key`. This is the architecturally opposite approach from mobile:
+web generates a real Ed25519 keypair first and derives Curve25519 from it for
+DH; mobile (libsignal-client) generates a single Curve25519 keypair and signs
+directly with it via XEdDSA — no separate Ed25519 keypair ever exists on
+mobile. `docs/blueprint.md`'s own tech-stack table already documented this
+split ("Web crypto: libsodium.js" vs "Native crypto: libsignal-client
+(iOS/Android)") — it just wasn't connected to this bug until now.
+
+**This directly contradicts the stated rationale for "fix the server, not the
+client":** the decision assumed "iOS/desktop clients... will also use
+libsignal-client." Desktop does not — it's `apps/web` wrapped in Tauri, and
+`apps/web`'s crypto is libsodium/genuine-Ed25519, unrelated to libsignal.
+
+**Made this concrete against the live, still-unmodified production server
+(not just code-reading), using the direct box access + egress this run
+finally has:**
+
+- POSTed a web-style request — genuine Node.js `crypto.generateKeyPairSync
+  ('ed25519')` identity key, `crypto.sign` over the RAW 32-byte prekey
+  public key (no 0x05 prefix — matching `keys.ts:65`, which signs
+  `kp.publicKey` directly, unlike mobile's `signedPrekeyMessage()`) — to
+  `https://relay.sublemonable.com/api/v1/register`.
+  **Result: `201 {"account_id":"9ccfd67d-acca-4a53-9d0b-78b5af61cbd6"}`.**
+  Web/desktop registration WORKS RIGHT NOW against the unmodified server.
+  (Leftover test account in the live DB — harmless, no real user data, but
+  noting it since there are no throwaway/staging accounts otherwise; worth a
+  cleanup pass before real launch, not urgent.)
+- POSTed the mobile-style real-libsignal vector from earlier in this run to
+  the same unmodified server: **`400 {"error":"bad_prekey_signature"}`** —
+  reconfirms Run 12's finding fresh, on today's live server state.
+
+**Conclusion: deploying this run's XEdDSA-only fix, as implemented, would fix
+Android/iOS registration and BREAK web/desktop registration**, which
+currently works. That's a regression on a live surface, not a strict
+improvement — did not deploy. There is also a THIRD divergence beyond
+scheme (Ed25519 vs XEdDSA) and identity-key form (Edwards vs Montgomery):
+**the signed bytes for the signed-prekey differ too** — web signs the raw
+32-byte prekey key directly; mobile signs the 33-byte `serialize()` form. A
+server fix that supports both platforms has to branch on message framing,
+not just choose a different `Verify` call.
+
+### Options for the maintainer (not decided here — see below)
+
+1. **Dual-scheme verify (recommended):** `Register`/`UploadPrekeys` try
+   standard `ed25519.Verify(identityKey, spkPub, spkSig)` (web/desktop shape)
+   OR `auth.VerifyXEdDSA(identityKey, signedPrekeyMessage(spkPub), spkSig)`
+   (mobile shape); `VerifyLogin` tries both schemes over the one
+   (unprefixed, same on both platforms) login-challenge message. No client
+   change on either platform. Care needed so the fallback doesn't widen what
+   verifies beyond "valid under exactly one real scheme" (keep length/
+   low-order-point checks identical on both paths).
+2. **Converge all clients on one scheme** — bigger lift, touches
+   `packages/crypto` (web) and/or the mobile clients' key generation, cuts
+   against "no client should sign non-standard," and is a real
+   compatibility-breaking change for it to matter (though the ledger's own
+   Run 12/13 finding is that neither mobile platform has ever completed a
+   live registration, so "breaking" mobile again costs nothing new — the
+   same is not true for web, which this run just proved works today).
+
+`VerifyXEdDSA` itself is correct and still needed under either option — nothing
+here is a reason to revert it, only to not make it the sole path.
+
+### NOT done this run
+
+- **No deploy.** The running `sublemonable-server-1` container is UNCHANGED;
+  the fix exists only on disk / in a to-be-created branch, not built into a
+  new image, not swapped into the live compose stack.
+- **No `docs/SECURITY_MODEL.md` update** — deferred until the maintainer
+  picks an option above; the doc should describe whichever scheme(s) the
+  server actually accepts, not what this run assumed going in.
+- Full end-to-end on-device test not run — blocked on the same decision.
+
+### Next action
+
+Maintainer/user decides between the two options above (or another). Once
+decided, this run's `VerifyXEdDSA` + tests are ready to wire in under either
+choice; the deploy-and-verify loop (build image, preserve rollback tag, swap
+only the `server` compose service, live register+login round trip via both a
+web-style and a libsignal-style client simulation, THEN an actual Android
+debug-client rebuild against it) resumes from there.
+
 ## Run 11 — On-device (adb-free) connection diagnostics for v1.5.3 (2026-07-15)
 
 Branch: `claude/android-registration-tracing-2b7du2` (restarted from `origin/main`
