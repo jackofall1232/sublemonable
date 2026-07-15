@@ -1011,3 +1011,48 @@ No keystore/SDK/Tor in this cloud session — signing and the four-surface publi
 relay box (`RELEASE_TAG=v1.5.2 scripts/release-android-on-box.sh` after merge). `links.ts` +
 `onion-site/SHA256SUMS` deliberately NOT flipped: the pointer must trail the signed-APK upload.
 Live verification of the mirrors likewise requires the box / a Tor-capable host.
+
+## Run 9 — v1.5.2 clearnet pointer flip; live verification BLOCKED from this environment (2026-07-15)
+
+Context: v1.5.2 already signed, staged to both Tor mirrors, and published to GitHub by a prior
+(box) run — this run's only job was the trailing clearnet pointer flip + live verification.
+
+### Discrepancy found before flipping (flagged, not silently fixed)
+`onion-site/SHA256SUMS` in git was still `48b5258c…b719  sublemonable-v1.5.1.apk` — the box run's
+`SHA256SUMS` update apparently never made it into a commit (unlike the v1.5.1 cut, where
+`561e43b` flipped `links.ts` + `onion-site/SHA256SUMS` together). Independently confirmed the
+correct v1.5.2 digest first: GitHub's own server-computed asset digest for
+`sublemonable-v1.5.2.apk` is `dae42f25c5baeddb1ebd455e8d9358a862539d6046f50a09ec9ef29fc7aa8f32`,
+matching the value supplied for this task exactly. Asked before touching anything beyond the
+literal `links.ts` instruction (task said "do not touch anything else"); user chose "update both,
+one commit" — matches precedent. Both files flipped in commit `a360dea`, pushed to `main`.
+
+### Clearnet live verification — COULD NOT BE PERFORMED from this environment
+Both independent fetch paths to `sublemonable.com` failed:
+- `curl` (Bash, via the sandbox's egress proxy): `CONNECT tunnel failed, response 403`. The
+  proxy's own status endpoint (`$HTTPS_PROXY/__agentproxy/status`) confirms this is a **gateway
+  policy denial**, not a transient fault: `recentRelayFailures` shows
+  `{"kind":"connect_rejected","detail":"gateway answered 403 to CONNECT (policy denial or
+  upstream failure)","host":"sublemonable.com:443"}`. `sublemonable.com` is simply not an
+  allowlisted egress destination for this sandbox (unlike github.com, developer.android.com, etc.,
+  which fetched fine earlier this session).
+- `WebFetch` (the model-side fetch tool, which does not route through the sandbox's local proxy —
+  it fetched `developer.android.com` successfully earlier this run): also returned a bare HTTP 403
+  from `sublemonable.com` directly. Could be Vercel deployment/bot protection or a WAF; not
+  investigated further since retrying against a host that's already refused twice risks looking
+  like evasion of a deliberate block, which isn't warranted here.
+- No Vercel MCP/connector is present in this session (checked) and no generic "commit status"
+  tool exists for a plain push to `main` (only `pull_request_read.get_status`, which needs an open
+  PR — this was a direct push, no PR). So Vercel's own deploy-completion status could not be
+  checked either.
+
+**Net: the commit is pushed (`a360dea`, `main`), but neither "Vercel deploy completed" nor "the
+live page shows v1.5.2" was confirmed from this session.** Per the task's own instruction, this
+run does NOT mark clearnet (or the overall four-surface release) as fully verified live — that
+requires a session/host with unblocked egress to `sublemonable.com` (or the user checking directly
+in a browser).
+
+### Next action
+Verify `https://sublemonable.com/download/beta` shows `v1.5.2` and
+`dae42f25c5baeddb1ebd455e8d9358a862539d6046f50a09ec9ef29fc7aa8f32` from a host with normal
+internet egress (a browser, or a session without this sandbox's proxy allowlist restriction).
