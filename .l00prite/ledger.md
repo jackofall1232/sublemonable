@@ -964,3 +964,50 @@ ways before the flip: (a) maintainer-provided value, (b) GitHub server-computed 
 - **Clearnet live page** — verification attempt + result recorded inline in the session (fetch of
   `sublemonable.com/download/beta` post-deploy). See session notes for the Vercel deploy + live-page
   outcome.
+
+## Run 8 — v1.5.1 Settings crash: root cause found in the shipped dex; v1.5.2 fix cut (2026-07-15)
+
+Report: clean install, app launches, tapping Settings crashes instantly, every time. No crash log.
+
+### Root cause (CONFIRMED against the shipped binary, not inferred)
+- Downloaded the actual released `sublemonable-v1.5.1.apk` from the GitHub release; sha256 matches
+  the published `48b5258c…b719`, so the analysis ran on the exact shipped bytes.
+- APK contents: Compose UI **1.6.7** + lifecycle-runtime-compose **2.8.2** (META-INF version
+  markers), R8-minified (`isMinifyEnabled = true`; CI only ever built **debug**).
+- `Route.Settings` in MainActivity is the app's ONLY lifecycle-compose call site
+  (`LifecycleResumeEffect`, the on-resume Orbot re-check added in #14). On Compose 1.6.x,
+  lifecycle 2.8.x resolves `LocalLifecycleOwner` via a reflection shim into compose-ui's
+  `AndroidCompositionLocals_androidKt`. In the shipped dex the type descriptor
+  `Landroidx/compose/ui/platform/AndroidCompositionLocals_androidKt;` is ABSENT (class renamed by
+  R8 — the library's conditional `-if` keep rule did not fire), while the shim's lookup strings and
+  the exact failure string `CompositionLocal LocalLifecycleOwner not present` are present.
+- Runtime chain: compose Settings → `LifecycleResumeEffect` → reflective `Class.forName` fails →
+  `IllegalStateException` during first composition → process death. 100% reproducible, release
+  builds only. Debug (CI, local smoke tests) is unminified, so the reflection succeeds — which is
+  exactly how it shipped. The 2.8.2 pin was made for THIS bug class (catalog comment cites
+  b/336842920) but only fixes the unminified case reliably.
+- Everything else in the audit brief checked out clean: Orbot query try/caught + manifest
+  `<queries>`; account-ID row null-safe; fingerprint work runCatching'd off-main;
+  KeyFingerprintDisplay empty-safe; LemonSlice math safe at level 0; identity-key pinning touches
+  no Settings render path.
+
+### Fix (branch `claude/settings-crash-audit-d8bdau`, v1.5.2, versionCode 4)
+1. MainActivity: Orbot on-resume re-check rewritten as compose-ui `LocalLifecycleOwner.current` +
+   `DisposableEffect`/`LifecycleEventObserver` (observer catch-up delivers ON_RESUME immediately
+   when already resumed — semantics preserved). No reflection anywhere in the path.
+2. `lifecycle-runtime-compose` dependency REMOVED (nothing uses it now); catalog comment documents
+   why it must not return until Compose BOM ≥ 1.7.
+3. proguard-rules.pro: unconditional keep for
+   `AndroidCompositionLocals_androidKt.getLocalLifecycleOwner` (defense-in-depth if
+   lifecycle-compose ever comes back transitively; deliberately NOT the `-if` form that failed).
+4. CI android job now also runs `:app:assembleRelease` (unsigned, minified) and greps the release
+   dex for the kept class — the exact gap (debug-only CI) that let this ship is now closed.
+5. CHANGELOG 1.5.2 cut. Android-only version bump (deliberate deviation from the 1.5.1
+   "bump everything" cut: no other surface changed; phantom desktop/iOS/web version bumps would
+   imply releases that don't exist).
+
+### NOT done here (custody boundary, same as Run 6)
+No keystore/SDK/Tor in this cloud session — signing and the four-surface publish must run on the
+relay box (`RELEASE_TAG=v1.5.2 scripts/release-android-on-box.sh` after merge). `links.ts` +
+`onion-site/SHA256SUMS` deliberately NOT flipped: the pointer must trail the signed-APK upload.
+Live verification of the mirrors likewise requires the box / a Tor-capable host.

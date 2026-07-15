@@ -55,8 +55,8 @@ android {
         applicationId = "com.sublemonable.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.5.1"
+        versionCode = 4
+        versionName = "1.5.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -142,7 +142,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
 
     // Compose

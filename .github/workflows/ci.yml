@@ -66,9 +66,23 @@ jobs:
         uses: android-actions/setup-android@v3
       - name: Install SDK packages
         run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
-      - name: Build debug APK + run unit tests
+      - name: Build debug + release APKs, run unit tests
         working-directory: apps/android
-        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug :app:testDebugUnitTest
+        # assembleRelease exercises R8/minification — the shipped APK is
+        # minified while debug is not, and v1.5.1's Settings crash existed
+        # only in the minified build. Release is unsigned here (no keystore
+        # secrets in CI); signing happens out-of-band on the release box.
+        run: ./gradlew --no-daemon --stacktrace :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest
+      - name: Verify R8 kept the LocalLifecycleOwner reflection target
+        working-directory: apps/android
+        # Guards the proguard-rules.pro keep for
+        # androidx.compose.ui.platform.AndroidCompositionLocals_androidKt.
+        # If R8 ever strips/renames it again, any lifecycle-compose API would
+        # crash on first composition in release builds only (v1.5.1 Settings bug).
+        run: |
+          unzip -p app/build/outputs/apk/release/app-release-unsigned.apk 'classes*.dex' \
+            | grep -aq 'Landroidx/compose/ui/platform/AndroidCompositionLocals_androidKt;' \
+            || { echo 'R8 stripped AndroidCompositionLocals_androidKt — lifecycle-compose APIs would crash in release builds (see v1.5.1 Settings crash)'; exit 1; }
 
   desktop-linux:
     name: Desktop — Linux build (.deb, .AppImage, .rpm)

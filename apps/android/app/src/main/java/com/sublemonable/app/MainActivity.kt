@@ -28,9 +28,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.sublemonable.app.data.Conversation
 import com.sublemonable.app.security.RootDetection
 import com.sublemonable.app.tor.TorIntegration
@@ -289,12 +291,24 @@ private fun SublemonableRoot(
             Route.Settings -> {
                 // Re-check Orbot on every resume: the user may install it via
                 // the "Get Orbot" action and return to this still-live screen.
+                // Deliberately NOT lifecycle-compose's LifecycleResumeEffect:
+                // on Compose 1.6.x it resolves its LifecycleOwner by reflection,
+                // and R8 strips the reflection target in minified release
+                // builds — composing it crashed every Settings open in v1.5.1.
+                // compose-ui's LocalLifecycleOwner is provided directly by
+                // setContent, no reflection involved.
                 var torAvailable by remember {
                     mutableStateOf(TorIntegration.isOrbotInstalled(context))
                 }
-                LifecycleResumeEffect(Unit) {
-                    torAvailable = TorIntegration.isOrbotInstalled(context)
-                    onPauseOrDispose { }
+                val lifecycleOwner = LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_RESUME) {
+                            torAvailable = TorIntegration.isOrbotInstalled(context)
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                 }
                 // Keystore + fingerprint work is off the main thread — doing it
                 // in composition can drop frames / ANR.
