@@ -49,7 +49,14 @@ class ApiClient(
     private val _accountId = MutableStateFlow(authPrefs.getString(KEY_ACCOUNT_ID, null))
     val accountIdFlow: StateFlow<String?> = _accountId.asStateFlow()
 
-    class ApiException(val code: Int, message: String) : IOException(message)
+    /**
+     * [responseBody] is the server's error payload on a non-2xx response —
+     * always one of the small, fixed `{"error": "<code>"}` validation codes
+     * from the server's `errJSON` helper (see internal/api/handlers.go),
+     * never request/response data that could contain user content. Safe to
+     * surface in diagnostics.
+     */
+    class ApiException(val code: Int, message: String, val responseBody: String? = null) : IOException(message)
 
     data class SessionTokens(val accessToken: String, val refreshToken: String)
 
@@ -237,11 +244,16 @@ class ApiClient(
                     response.use {
                         val text = it.body?.string().orEmpty()
                         if (!it.isSuccessful) {
-                            // Error detail only — never request/response bodies
-                            // that could contain user data.
+                            // Body capped defensively even though the server's
+                            // error responses are always a short fixed-vocabulary
+                            // code — never assume a well-behaved server.
                             if (continuation.isActive) {
                                 continuation.resumeWithException(
-                                    ApiException(it.code, "HTTP ${it.code}"),
+                                    ApiException(
+                                        it.code,
+                                        "HTTP ${it.code}",
+                                        text.take(MAX_ERROR_BODY_CHARS).ifBlank { null },
+                                    ),
                                 )
                             }
                             return
@@ -267,6 +279,9 @@ class ApiClient(
 
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        /** Defensive cap on the error body surfaced in [ApiException.responseBody]. */
+        private const val MAX_ERROR_BODY_CHARS = 200
 
         private const val KEY_ACCOUNT_ID = "account_id"
         private const val KEY_ACCESS_TOKEN = "access_token"

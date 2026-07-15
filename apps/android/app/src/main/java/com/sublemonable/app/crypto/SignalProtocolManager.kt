@@ -86,8 +86,14 @@ class SignalProtocolManager(
 
     fun localRegistrationId(): Int = store.getLocalRegistrationId()
 
-    fun localIdentityPublicKeyBase64(): String =
-        encode(store.getIdentityKeyPair().publicKey.serialize())
+    // Registration wire format is the raw 32-byte Curve25519 key (no libsignal
+    // DJB type-prefix byte) — see server internal/api/handlers.go registerRequest,
+    // which validates len(identity_key) == ed25519.PublicKeySize (32). serialize()
+    // would produce a 33-byte, 0x05-prefixed value and get rejected as bad_identity_key.
+    fun localIdentityPublicKeyBase64(): String {
+        val identityKey = store.getIdentityKeyPair().publicKey
+        return encode(identityKey.publicKey.getPublicKeyBytes())
+    }
 
     fun localIdentityPublicKeyBytes(): ByteArray =
         store.getIdentityKeyPair().publicKey.serialize()
@@ -112,16 +118,20 @@ class SignalProtocolManager(
     fun generateSignedPreKey(): SignedPreKeyDto {
         val id = nextId(KEY_NEXT_SIGNED_PREKEY_ID)
         val keyPair = Curve.generateKeyPair()
+        // Sign the same raw 32-byte form that goes out over the wire (below) —
+        // signing serialize()'s 33-byte, type-prefixed form here while uploading
+        // the 32-byte form would make the signature unverifiable server-side.
+        val rawPublicKey = keyPair.publicKey.getPublicKeyBytes()
         val signature = Curve.calculateSignature(
             store.getIdentityKeyPair().privateKey,
-            keyPair.publicKey.serialize(),
+            rawPublicKey,
         )
         val timestamp = System.currentTimeMillis()
         store.storeSignedPreKey(id, SignedPreKeyRecord(id, timestamp, keyPair, signature))
         prefs.edit().putLong(KEY_SIGNED_PREKEY_CREATED_AT, timestamp).apply()
         return SignedPreKeyDto(
             id = id,
-            publicKeyBase64 = encode(keyPair.publicKey.serialize()),
+            publicKeyBase64 = encode(rawPublicKey),
             signatureBase64 = encode(signature),
             timestampMs = timestamp,
         )
@@ -144,7 +154,7 @@ class SignalProtocolManager(
             val id = nextId(KEY_NEXT_PREKEY_ID)
             val keyPair = Curve.generateKeyPair()
             store.storePreKey(id, PreKeyRecord(id, keyPair))
-            OneTimePreKeyDto(id = id, publicKeyBase64 = encode(keyPair.publicKey.serialize()))
+            OneTimePreKeyDto(id = id, publicKeyBase64 = encode(keyPair.publicKey.getPublicKeyBytes()))
         }
 
     fun localOneTimePreKeyCount(): Int = store.countOneTimePreKeys()

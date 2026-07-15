@@ -2,6 +2,48 @@
 
 ## Next
 
+- [ ] **BLOCKING registration end-to-end: server must verify XEdDSA signatures,
+      not plain Ed25519 (Run 12, `claude/android-register-key-encoding`).**
+      `Register` (`internal/api/handlers.go:125`) and `VerifyLogin`
+      (`internal/auth/jwt.go:93`) both call Go stdlib `ed25519.Verify` directly
+      on a raw Curve25519 identity-key byte string. That key is generated and
+      signed via libsignal's XEdDSA over the Montgomery-form curve (correct
+      per `docs/SECURITY_MODEL.md` and required for X3DH) — XEdDSA signatures
+      are NOT plain-Ed25519-verifiable without a Montgomery→Edwards conversion
+      first, and the server does none anywhere (grepped, zero hits). Empirically
+      confirmed this run: a real libsignal-produced signature failed standard
+      Ed25519 verification in all tested combinations. This is a cryptography
+      change per `constraints.md` — needs a maintainer + Go toolchain (absent in
+      the coding sandbox) to implement (likely via `filippo.io/edwards25519`,
+      not yet a dependency) and test against a live device. Full trace, the
+      empirical method, and why this blocks registration end-to-end even after
+      the wire-format fix below: `.l00prite/ledger.md` Run 12.
+      - The client-side half of the same bug (registration uploaded 33-byte
+        libsignal-`serialize()` keys against a server that requires raw 32-byte
+        keys) IS fixed on `claude/android-register-key-encoding`
+        (`SignalProtocolManager.kt`, `ApiClient.kt`) — compiles, existing unit
+        tests pass, but registration will NOT fully succeed until this
+        server-side item also lands.
+      - iOS (`SignalManager.swift`) has the identical `.serialize()` /
+        XEdDSA-vs-Ed25519 pattern — assume iOS registration is equally broken
+        against a live server until proven otherwise; do not treat "iOS already
+        shipped" as evidence it works, per Run 12's finding that no platform's
+        register call has ever been confirmed round-tripping against the real
+        Go server.
+- [ ] **Follow-up, same bug class as Run 12, deliberately not fixed there:**
+      `SignalProtocolManager.establishSession()` (X3DH prekey-bundle consumption,
+      `GET /api/v1/users/:id/prekey`) and `localIdentityPublicKeyBytes()`
+      (safety numbers / fingerprint) still decode/encode via the type-prefixed
+      `Curve.decodePoint` / `IdentityKey(byte[])` / `serialize()` path, not
+      `getPublicKeyBytes()`. Not reachable during boot/registration, so out of
+      scope for Run 12's fix, but it's the same 32-vs-33-byte mismatch and will
+      surface as soon as two registered accounts try to message each other or
+      compare safety numbers.
+- [ ] **Structural risk (flagged, not actioned):** client and server each define
+      the registration/auth wire contract independently, with no shared
+      schema/spec either side validates against — this exact class of drift
+      (silent field-encoding mismatch) will recur. Worth a small shared
+      "wire contract" doc or generated types from one schema. See ledger Run 12.
 - [ ] **Android transport hardening (follow-up, deliberately OUT of scope for the
       registration-tracing PR #19).** Two gaps surfaced while tracing the boot path;
       both are separate, larger pieces of work than that PR should carry:
