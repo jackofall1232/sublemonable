@@ -920,3 +920,47 @@ the `v1.5.1` GitHub release appears, with an independent checksum recompute.
 Step-1 gate PASSED — no documented-but-unshipped fix; v1.5.0's failure mode is not repeated. The
 release cannot be *cut* from this environment by design; it must be run on the relay box. Nothing
 was built, signed, or shipped this run.
+
+## Run 7 — v1.5.1 SHIPPED across all four surfaces (2026-07-14 → 15)
+
+Release cut on the relay box; this session closed the trailing clearnet surface. **v1.5.1 is now
+live on all four distribution surfaces.**
+
+### Shipped
+1. **GitHub release** — `v1.5.1` (prerelease), published 2026-07-15T00:20Z from `main` @ `9990a9e`.
+   Assets: `sublemonable-v1.5.1.apk` (29,471,888 B) + `SHA256SUMS`. Signing cert
+   `6c7f92a7…892753` (continuity with v1.0.0/v1.5.0-beta — existing installs update in place).
+2. **Public Tor mirror** — signed APK + regenerated SHA256SUMS staged on the box (done in the box
+   release run; not reachable from this cloud env — see "could not confirm live").
+3. **Secret Tor mirror** — same binary/checksum staged (same caveat).
+4. **Clearnet marketing site (Vercel)** — `website/src/lib/links.ts` flipped to
+   `ANDROID_BETA_VERSION="v1.5.1"` + `ANDROID_BETA_SHA256="48b5258c…b719"`; `onion-site/SHA256SUMS`
+   synced to `48b5258c…b719  sublemonable-v1.5.1.apk` (was still the stale v1.5.0-beta line).
+   Commit `561e43b`, pushed to `main`.
+
+### Checksum verification (the release-integrity anchor)
+`48b5258c6c03fa008aebeca7388ef1ec8f785607400d67a4dccc3c292ec7b719` confirmed FIVE independent
+ways before the flip: (a) maintainer-provided value, (b) GitHub server-computed asset digest,
+(c) release-notes body, (d) release `SHA256SUMS` asset, (e) local `sha256sum` of the downloaded
+29 MB APK. All identical. Signing cert also matches the pinned release key.
+
+### Infra learnings for next release
+- **GitHub PAT scope.** The box run initially couldn't publish the release / upload assets until the
+  token scope was fixed (needs `contents:write` on the repo). Pre-check the PAT scope before the
+  next release run so publishing doesn't stall mid-cut.
+- **`ANDROID_HOME` env.** The signed build needed `ANDROID_HOME` (SDK + build-tools/`apksigner`)
+  exported in the box environment; it was unset initially. Ensure it's set (and `build-tools`
+  installed) before invoking `scripts/release-android-on-box.sh`.
+
+### Risk item CLOSED
+- **Release keystore + password backup (2026-07-14).** The `.jks` and its password are now backed
+  up off-box. The long-standing "release keystore off-box pull (pending user)" TODO is resolved —
+  loss of the signing key is no longer a single-point permanent-failure risk.
+
+### Could NOT confirm live from this environment (explicit)
+- **Both Tor `.onion` mirrors** — no Tor client in this cloud session; their live state was not
+  independently fetched here. They were staged during the box release run; verify over Tor from a
+  Tor-capable host if independent confirmation is required.
+- **Clearnet live page** — verification attempt + result recorded inline in the session (fetch of
+  `sublemonable.com/download/beta` post-deploy). See session notes for the Vercel deploy + live-page
+  outcome.
