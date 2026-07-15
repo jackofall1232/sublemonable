@@ -2,43 +2,41 @@
 
 ## Next
 
-- [ ] **BLOCKING registration end-to-end: server must verify XEdDSA signatures,
-      not plain Ed25519 (Run 12, `claude/android-register-key-encoding`).**
-      `Register` (`internal/api/handlers.go:125`) and `VerifyLogin`
-      (`internal/auth/jwt.go:93`) both call Go stdlib `ed25519.Verify` directly
-      on a raw Curve25519 identity-key byte string. That key is generated and
-      signed via libsignal's XEdDSA over the Montgomery-form curve (correct
-      per `docs/SECURITY_MODEL.md` and required for X3DH) — XEdDSA signatures
-      are NOT plain-Ed25519-verifiable without a Montgomery→Edwards conversion
-      first, and the server does none anywhere (grepped, zero hits). Empirically
-      confirmed this run: a real libsignal-produced signature failed standard
-      Ed25519 verification in all tested combinations. This is a cryptography
-      change per `constraints.md` — needs a maintainer + Go toolchain (absent in
-      the coding sandbox) to implement (likely via `filippo.io/edwards25519`,
-      not yet a dependency) and test against a live device. Full trace, the
-      empirical method, and why this blocks registration end-to-end even after
-      the wire-format fix below: `.l00prite/ledger.md` Run 12.
-      - **Refined in Run 13:** the signed-prekey signature is (deliberately)
-        computed over the 33-byte libsignal `serialize()` form, NOT the raw
-        32-byte wire form — peer-to-peer `SessionBuilder.process()` requires
-        this (see Run 13). So the server-side verification fix must
-        **reconstruct** the 33-byte form (prepend the constant DJB type byte,
-        `0x05` for Curve25519, to the stored/uploaded 32-byte key) before
-        running XEdDSA verification — verifying against the raw 32-byte form
-        directly, even with otherwise-correct Montgomery→Edwards math, will
-        reject every valid signature.
-      - The client-side half of the same bug (registration uploaded 33-byte
-        libsignal-`serialize()` keys against a server that requires raw 32-byte
-        keys) IS fixed on `claude/android-register-key-encoding`
-        (`SignalProtocolManager.kt`, `ApiClient.kt`) — compiles, existing unit
-        tests pass, but registration will NOT fully succeed until this
-        server-side item also lands.
-      - iOS (`SignalManager.swift`) has the identical `.serialize()` /
-        XEdDSA-vs-Ed25519 pattern — assume iOS registration is equally broken
-        against a live server until proven otherwise; do not treat "iOS already
-        shipped" as evidence it works, per Run 12's finding that no platform's
-        register call has ever been confirmed round-tripping against the real
-        Go server.
+- [x] ~~BLOCKING registration end-to-end: server must verify XEdDSA
+      signatures, not plain Ed25519~~ — **resolved in Run 14**
+      (`claude/server-xeddsa-verification`, not yet merged to `main`).
+      `Register`/`UploadPrekeys` (via `verifySignedPrekey()`) and
+      `VerifyLogin` now accept EITHER genuine Ed25519 (web/desktop,
+      `packages/crypto/src/keys.ts`) OR libsignal's XEdDSA over a
+      Curve25519 key (Android/iOS, `auth.VerifyXEdDSA`) — turned out to be
+      a dual-scheme problem, not a "pick the right one" problem: web/desktop
+      was ALREADY using genuine Ed25519 and worked correctly against the
+      original server, so a straight swap to XEdDSA-only (briefly
+      implemented mid-run) would have fixed mobile while breaking
+      web/desktop. Confirmed live against production, for BOTH platforms,
+      register AND login: see `.l00prite/ledger.md` Run 14 second half for
+      the full deploy trace (rollback tag preserved, candidate smoke-tested
+      on an isolated port before touching the live container, only the
+      `server` compose service touched).
+      - **Needs review/merge**: `claude/server-xeddsa-verification` is
+        pushed to `origin` but has no PR yet — same manual step Run 12/13
+        needed (no `gh` CLI in the coding sandbox, and GitHub PATs are
+        operator-only per `constraints.md`); someone with `gh`/web access
+        needs to open the PR from the pushed branch.
+      - The client-side half (registration uploading raw 32-byte keys) is
+        already merged to `main` via PR #21 (Run 12/13).
+      - iOS (`SignalManager.swift`) still has the client-side
+        `.serialize()`-vs-raw-32-byte encoding mismatch that Android had
+        before Run 12/13's fix — **not yet fixed on iOS**. The server now
+        correctly verifies XEdDSA signatures either way, but iOS's
+        `bootstrapIdentity()`/`generateSignedPreKeyLocked()` still upload
+        the 33-byte `serialize()` form (see `docs/blueprint.md`/Run 12's
+        original grep), which the server's length check
+        (`len(identityKey) != ed25519.PublicKeySize`) will still reject at
+        33 bytes regardless of the signature-scheme fix. iOS needs the same
+        `getPublicKeyBytes()`-style fix Android got in PR #21 before iOS
+        registration will work — this is now the likely next platform-
+        specific blocker, tracked here so it isn't lost.
 - [x] ~~`SignalProtocolManager.establishSession()` and
       `localIdentityPublicKeyBytes()` still use the type-prefixed decode/encode
       path~~ — **fixed in Run 13** (PR #21 review response): both now use
