@@ -30,6 +30,18 @@
 # so reflection is not used — these rules are belt-and-braces only).
 -keep class com.sublemonable.app.data.MessageEnvelope { *; }
 
+# lifecycle-runtime-compose 2.8.x on Compose 1.6.x resolves LocalLifecycleOwner
+# by REFLECTING into this compose-ui class. R8 renamed it in the shipped v1.5.1
+# release APK (verified in its dex), so the one lifecycle-compose call site —
+# Settings — crashed on every open with "CompositionLocal LocalLifecycleOwner
+# not present". The app no longer uses lifecycle-compose APIs, but keep the
+# reflection target unconditionally so a future direct or transitive use can
+# never re-arm the crash. (The library's own conditional -if rule is the thing
+# that failed to fire; do not "simplify" this back to the -if form.)
+-keep class androidx.compose.ui.platform.AndroidCompositionLocals_androidKt {
+    public static *** getLocalLifecycleOwner();
+}
+
 # No logging in release: strip any stray android.util.Log calls defensively.
 # (The codebase contains none by policy, this enforces it at build time.)
 -assumenosideeffects class android.util.Log {

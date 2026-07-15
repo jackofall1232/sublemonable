@@ -7,6 +7,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-07-15
+
+### Fixed
+
+- **Android: opening Settings crashed the release build, every time.** The Settings route was the
+  app's only user of `LifecycleResumeEffect` (lifecycle-runtime-compose). On Compose 1.6.x that API
+  resolves its `LifecycleOwner` through a reflection shim into compose-ui's
+  `AndroidCompositionLocals_androidKt`; R8 renamed that class in the minified v1.5.1 release APK
+  (confirmed in the shipped dex), so the first composition of Settings threw
+  `IllegalStateException: CompositionLocal LocalLifecycleOwner not present`. Debug builds — the only
+  thing CI built — are not minified, so the crash never appeared there. The Orbot re-check on resume
+  now uses compose-ui's `LocalLifecycleOwner` with a plain `DisposableEffect` observer (no
+  reflection), the lifecycle-runtime-compose dependency is removed, a defensive keep rule pins the
+  reflection target, and CI now also builds the minified release APK and asserts the kept class
+  survives R8.
+
 ### Added
 
 - **Android release-signing + publish pipeline.** `apps/android/app/build.gradle.kts` now wires a

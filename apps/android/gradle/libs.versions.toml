@@ -10,8 +10,11 @@ composeCompiler = "1.5.14"
 composeBom = "2024.05.00"
 coreKtx = "1.13.1"
 activityCompose = "1.9.0"
-# 2.8.2 (not 2.8.0/2.8.1): earlier 2.8.x crash "LocalLifecycleOwner not present"
-# when paired with Compose 1.6.x (this BOM); 2.8.2 works with any Compose. b/336842920.
+# lifecycle-runtime-ktx only. lifecycle-runtime-COMPOSE must not come back while
+# Compose is 1.6.x: its LocalLifecycleOwner resolves via reflection there, R8
+# strips the target in minified release builds, and any lifecycle-compose API
+# then throws "LocalLifecycleOwner not present" on first composition (the
+# v1.5.1 Settings crash). Safe again once Compose BOM is 1.7+. b/336842920.
 lifecycle = "2.8.2"
 coroutines = "1.8.1"
 okhttp = "4.12.0"
@@ -29,7 +32,6 @@ desugar = "2.0.4"
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
-androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 compose-ui = { group = "androidx.compose.ui", name = "ui" }
 compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
