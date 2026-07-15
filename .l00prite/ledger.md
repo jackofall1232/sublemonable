@@ -1810,6 +1810,36 @@ the Diagnostics screen once one is available to do so.
    is safe to delete; clear the test accounts created during this run's
    verification.
 
+### Run 14 (continued) — PR #22 automated review response, redeployed
+
+Copilot review on PR #22 caught two real issues in `xeddsa.go`:
+
+1. Its doc comment claimed XEdDSA is "what every Sublemonable client signs
+   with" / identity keys are Curve25519 everywhere — stale, contradicted by
+   this same PR's own dual-scheme support. Reworded to describe only the
+   Android/iOS half of the split.
+2. The Montgomery→Edwards map (`ed_y = (mont_x-1)/(mont_x+1)`) is undefined
+   at `mont_x = -1 (mod p)` (`mont_x+1 = 0`); `field.Element.Invert` silently
+   returns 0 for a zero input instead of erroring, so a degenerate public
+   key would flow through to a meaningless `edY = 0` rather than being
+   rejected deterministically. Added an explicit zero check before
+   inverting, plus a regression test constructing the exact `u = -1`
+   degenerate key.
+
+(Gemini and Copilot's summary review had no further findings.)
+
+Verified (`golang:1.25` Docker toolchain): `gofmt -l .`, `go vet`, `go build`,
+`go test -race ./...` all clean, including the new
+`TestVerifyXEdDSA_RejectsDegenerateMontgomeryMinusOne`. Manually confirmed
+via a direct request against a throwaway candidate container that the
+degenerate key now gets a clean `{"error":"bad_prekey_signature"}` instead
+of undefined behavior, and that normal mobile register+login
+(`FullE2E.java`) is unaffected. **Redeployed to the live production server**
+using the same reversible process as the original fix (build, smoke-test on
+an isolated port — `127.0.0.1:8445` this time — swap only the `server`
+compose service, confirm `/healthz`). Committed and pushed to
+`claude/server-xeddsa-verification`.
+
 ## Run 11 — On-device (adb-free) connection diagnostics for v1.5.3 (2026-07-15)
 
 Branch: `claude/android-registration-tracing-2b7du2` (restarted from `origin/main`
