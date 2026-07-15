@@ -3,6 +3,7 @@ module github.com/sublemonable/server
 go 1.25.0
 
 require (
+	filippo.io/edwards25519 v1.2.0
 	github.com/gofiber/contrib/websocket v1.3.2
 	github.com/gofiber/fiber/v2 v2.52.11
 	github.com/golang-jwt/jwt/v5 v5.2.2

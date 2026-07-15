@@ -540,8 +540,15 @@ public final class SignalManager {
     /// Signs the server login challenge with the identity key. The challenge
     /// format is fixed by the server spec:
     ///     "sublemonable-login:<account_id>:<unix_ts>"
-    /// The XEdDSA signature produced by the Curve25519 identity key verifies
-    /// as a standard Ed25519 signature server-side.
+    /// The XEdDSA signature produced by the Curve25519 identity key is NOT a
+    /// standard Ed25519 signature and does not verify as one — the server
+    /// verifies it via a dedicated XEdDSA check (VerifyXEdDSA), tried
+    /// alongside plain Ed25519 to also support the web/desktop client, which
+    /// uses a genuine Ed25519 identity key instead. This was a real bug
+    /// until it wasn't: see .l00prite/ledger.md Run 12/14 and
+    /// docs/SECURITY_MODEL.md's "Identity-key signing scheme differs by
+    /// platform" — don't reintroduce the "XEdDSA verifies as plain Ed25519"
+    /// assumption this comment used to (wrongly) make.
     public func loginSignature(accountID: UUID, unixTimestamp: Int) throws -> Data {
         try queue.sync {
             let identity = try store.identityKeyPair(context: NullContext())

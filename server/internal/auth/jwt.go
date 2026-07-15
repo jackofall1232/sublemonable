@@ -74,14 +74,20 @@ func (i *Issuer) ValidateAccessToken(token string) (uuid.UUID, error) {
 
 // ── login challenge ──────────────────────────────────────────────────────────
 
-// LoginMessage is the byte string a client signs with its Ed25519 identity key
-// to authenticate: there are no passwords, possession of the identity key IS
-// the account.
+// LoginMessage is the byte string a client signs with its identity key to
+// authenticate: there are no passwords, possession of the identity key IS
+// the account. The message itself is identical across platforms — only the
+// signing scheme differs (see VerifyLogin).
 func LoginMessage(accountID uuid.UUID, timestamp time.Time) []byte {
 	return []byte(fmt.Sprintf("sublemonable-login:%s:%d", accountID, timestamp.Unix()))
 }
 
-// VerifyLogin checks the timestamp window and the Ed25519 signature.
+// VerifyLogin checks the timestamp window and the signature over the login
+// challenge. Accepts either signing convention currently in use across
+// clients: genuine Ed25519 (web/desktop, packages/crypto/src/keys.ts) or
+// libsignal's XEdDSA over a Curve25519 key (Android/iOS) — see VerifyXEdDSA
+// and .l00prite/ledger.md Run 14. Unlike the signed-prekey path, the message
+// itself is identical either way, so both checks run over the same bytes.
 func VerifyLogin(identityKey []byte, accountID uuid.UUID, timestamp time.Time, signature []byte, now time.Time) error {
 	if len(identityKey) != ed25519.PublicKeySize {
 		return fmt.Errorf("bad identity key length")
@@ -90,7 +96,8 @@ func VerifyLogin(identityKey []byte, accountID uuid.UUID, timestamp time.Time, s
 	if drift < -LoginSkew || drift > LoginSkew {
 		return fmt.Errorf("login timestamp outside window")
 	}
-	if !ed25519.Verify(identityKey, LoginMessage(accountID, timestamp), signature) {
+	message := LoginMessage(accountID, timestamp)
+	if !ed25519.Verify(identityKey, message, signature) && !VerifyXEdDSA(identityKey, message, signature) {
 		return fmt.Errorf("signature verification failed")
 	}
 	return nil

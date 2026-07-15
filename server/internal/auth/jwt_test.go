@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"os"
 	"path/filepath"
@@ -77,26 +78,87 @@ func TestTamperedTokenRejected(t *testing.T) {
 	}
 }
 
+// Real libsignal-client vectors (generated via IdentityKeyPair.generate() +
+// Curve.calculateSignature() — the exact mobile client code path, see
+// xeddsa_test.go for provenance/regeneration notes), NOT ed25519.GenerateKey/
+// ed25519.Sign — this exercises VerifyLogin's XEdDSA branch specifically. A
+// self-generated Go-side Ed25519 signature would only prove the OTHER
+// (web/desktop) branch works; see TestLoginChallenge_WebStyleEd25519 below
+// for that one, where generating with ed25519.GenerateKey IS the right test
+// (it's exactly what a genuine-Ed25519 client does, and this is testing
+// VerifyLogin's dispatch, not re-deriving crypto primitives).
+const (
+	loginTestIdentityRaw32B64 = "qpblp1zlEzle3zMgnFcP8EMULiHr9nFwrb3IVXOENzw="
+	loginTestOtherRaw32B64    = "wcicHYcoPMrc9XU8FdZOqbIqQBH7Q7i4u/Afk9t1sRo="
+	loginTestAccountID        = "11111111-2222-3333-4444-555555555555"
+	loginTestNowTs            = 1752000000
+	loginTestStaleTs          = 1751999400 // 10 minutes earlier — outside LoginSkew
+	loginTestNowSigB64        = "gaL/TAfrRBeaTywNKGF6xucK8off6cDrRn9zrIe0Z7PHDzUFu7VW4RvDC0IMB4Nt3YNsoUXb5KrLk8TA3FpRhA=="
+	loginTestStaleSigB64      = "V6ZAAhwyBOhA/78gqECM1k1sAoPkC4m7OI6tIzn6vqr7e8JUtEBdvy5gxN9MB3QzEaf2JRZ77NpV7gBdpMVIjg=="
+)
+
 func TestLoginChallenge(t *testing.T) {
-	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub := mustB64(t, loginTestIdentityRaw32B64)
+	accountID := uuid.MustParse(loginTestAccountID)
+	now := time.Unix(loginTestNowTs, 0)
+	sig := mustB64(t, loginTestNowSigB64)
+
+	if err := VerifyLogin(pub, accountID, now, sig, now); err != nil {
+		t.Fatalf("valid login rejected: %v", err)
+	}
+	// Replayed outside the window — a cryptographically VALID signature over
+	// a stale timestamp must still be rejected on the time check.
+	stale := time.Unix(loginTestStaleTs, 0)
+	staleSig := mustB64(t, loginTestStaleSigB64)
+	if err := VerifyLogin(pub, accountID, stale, staleSig, now); err == nil {
+		t.Fatal("stale login accepted")
+	}
+	// Signature by the wrong key
+	otherPub := mustB64(t, loginTestOtherRaw32B64)
+	if err := VerifyLogin(otherPub, accountID, now, sig, now); err == nil {
+		t.Fatal("forged login accepted")
+	}
+	// Tampered signature (single bit flip)
+	tampered := append([]byte(nil), sig...)
+	tampered[0] ^= 0x01
+	if err := VerifyLogin(pub, accountID, now, tampered, now); err == nil {
+		t.Fatal("tampered signature accepted")
+	}
+}
+
+// Covers VerifyLogin's other branch: a genuine Ed25519 identity key, exactly
+// as apps/web/apps/desktop generate via packages/crypto/src/keys.ts
+// (sodium.crypto_sign_keypair + crypto_sign_detached, both standard Ed25519).
+// This convention was independently confirmed live against production in
+// Run 14 (a real Node.js-generated Ed25519 registration request got a live
+// 201 from the still-unmodified server) — this test pins that same
+// dual-scheme behavior at the unit level so a future change can't silently
+// drop web/desktop support while "fixing" the mobile path again.
+func TestLoginChallenge_WebStyleEd25519(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	accountID := uuid.New()
 	now := time.Now()
 	sig := ed25519.Sign(priv, LoginMessage(accountID, now))
 
 	if err := VerifyLogin(pub, accountID, now, sig, now); err != nil {
-		t.Fatalf("valid login rejected: %v", err)
+		t.Fatalf("valid web-style login rejected: %v", err)
 	}
-	// Replayed outside the window
-	stale := now.Add(-LoginSkew - time.Minute)
-	staleSig := ed25519.Sign(priv, LoginMessage(accountID, stale))
-	if err := VerifyLogin(pub, accountID, stale, staleSig, now); err == nil {
-		t.Fatal("stale login accepted")
-	}
-	// Signature by the wrong key
 	otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
 	if err := VerifyLogin(otherPub, accountID, now, sig, now); err == nil {
-		t.Fatal("forged login accepted")
+		t.Fatal("forged web-style login accepted")
 	}
+}
+
+func mustB64(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 func TestRefreshTokenHashing(t *testing.T) {
