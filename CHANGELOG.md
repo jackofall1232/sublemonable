@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.3] - 2026-07-15
+
+### Added
+
+- **Android: on-device connection diagnostics (Settings → Diagnostics).** A permanent,
+  privacy-safe log of every registration/connection attempt — boot stage markers plus the
+  transport error class and message on failure (e.g. a certificate-pinning rejection, a TLS
+  handshake/version failure, or an unreachable relay) — written to an app-private file and shown
+  as plain, selectable, copyable text. It requires no `adb`/`logcat` and no second machine, so a
+  user stuck on “Connecting…” can read the exact failure and paste it into a bug report. The same
+  lines still go to logcat under the `SublemonableBoot` tag when `adb` *is* available. The log is
+  capped at the 50 most recent lines and is never backed up (`allowBackup=false`). It contains no
+  message content, keys, tokens, or account IDs by construction.
+
 ## [1.5.2] - 2026-07-15
 
 ### Fixed

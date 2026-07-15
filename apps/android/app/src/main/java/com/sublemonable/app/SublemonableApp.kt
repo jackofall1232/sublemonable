@@ -12,6 +12,7 @@ import com.sublemonable.app.crypto.SignalProtocolManager
 import com.sublemonable.app.data.ConversationRepository
 import com.sublemonable.app.data.MessageRepository
 import com.sublemonable.app.data.SettingsRepository
+import com.sublemonable.app.diagnostics.BootDiagnostics
 import com.sublemonable.app.net.ApiClient
 import com.sublemonable.app.net.CertificatePinning
 import com.sublemonable.app.net.WsClient
@@ -64,6 +65,9 @@ class AppContainer(private val app: Application) {
     val messageRepository = MessageRepository(scope)
     val conversationRepository = ConversationRepository()
 
+    /** On-device, adb-free boot diagnostics (Settings → Diagnostics). */
+    val bootDiagnostics = BootDiagnostics(app)
+
     val coordinator = MessagingCoordinator(
         appContext = app,
         scope = scope,
@@ -72,6 +76,7 @@ class AppContainer(private val app: Application) {
         ws = wsClient,
         messages = messageRepository,
         conversations = conversationRepository,
+        diagnostics = bootDiagnostics,
     )
 
     init {
