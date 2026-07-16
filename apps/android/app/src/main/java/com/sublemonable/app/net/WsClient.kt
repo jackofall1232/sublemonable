@@ -24,19 +24,49 @@ import kotlin.math.min
 /**
  * Authenticated WebSocket (WS /ws) for real-time message delivery.
  *
- * Event names mirror server.websocket_events exactly:
- *  client -> server: message.send, message.ack, message.burn,
- *                    typing.start, typing.stop, presence.update
- *  server -> client: message.deliver, message.burned, prekey.low,
- *                    session.revoked, error
+ * WIRE CONTRACT — must stay byte-compatible with the server
+ * (server/internal/ws/hub.go) and packages/protocol/src/events.ts. Frames are
+ * FLAT: every field sits next to "type" at the top level — there is NO
+ * "payload" wrapper. (v1.5.3 shipped a nested {type, payload} shape the server
+ * has never spoken; see .l00prite/ledger.md.)
+ *
+ *  client -> server: {"type":"message.send","envelope":{...}}
+ *                    {"type":"message.ack","message_id":...}
+ *                    {"type":"message.burn","message_id":...,"peer_id":...}
+ *                    {"type":"typing.start"/"typing.stop","peer_id":...}
+ *  server -> client: {"type":"message.deliver","envelope":{...}}
+ *                    {"type":"message.burned","message_id":...,"peer_id":...}
+ *                    {"type":"prekey.low","remaining":...}
+ *                    {"type":"session.revoked"} / {"type":"error","code":...}
+ *
+ * presence.update is deliberately NOT implemented here: the canonical event
+ * carries an encrypted ciphertext signal Android does not yet produce, and
+ * the server's relaySignal drops every presence frame today regardless of
+ * client (it routes by a peer_id the presence event does not define) — so a
+ * stub would only pin a dead, wrong shape. Rebuild it against the canonical
+ * encrypted-signal shape when presence lands in the UI.
+ *
+ * Handshake auth: the JWT rides the Sec-WebSocket-Protocol request header —
+ * the only header the server's /ws middleware reads (an Authorization header
+ * is ignored there; the ?token= query param is the documented fallback but
+ * would put the token in URLs, which proxies love to log). OkHttp passes the
+ * header through verbatim and does not require the server to echo it.
  *
  * Acking a delivery is what triggers the server to DELETE the stored
  * envelope (store-and-forward only) — see [ackMessage].
+ *
+ * Socket-lifecycle diagnostics go through [diag] — the same privacy-safe
+ * channel as the boot-stage logging in MessagingCoordinator (fixed stage
+ * strings + exception class/message + HTTP status only; never tokens, frame
+ * contents, account ids, or URLs). Without it, a rejected or unreachable
+ * handshake is invisible: the socket retries forever and the UI just says
+ * "Connecting…" (exactly how v1.5.3 failed).
  */
 class WsClient(
     private val wsUrl: String,
     private var client: OkHttpClient,
     private val scope: CoroutineScope,
+    private val diag: (String) -> Unit = {},
 ) {
 
     /** Inbound events, fully typed. No raw frames escape this class. */
@@ -48,8 +78,6 @@ class WsClient(
         fun onMessageBurned(messageId: String)
 
         fun onTyping(senderId: String, started: Boolean)
-
-        fun onPresence(userId: String, online: Boolean)
 
         /** Server-side one-time prekey stock is low — upload another batch. */
         fun onPreKeyLow(remaining: Int)
@@ -111,42 +139,32 @@ class WsClient(
 
     // -- outbound events ------------------------------------------------------
 
-    /** message.send — encrypted envelope + recipient id. */
+    /** message.send — the envelope itself carries the recipient for routing. */
     fun sendMessage(envelope: MessageEnvelope): Boolean =
-        send("message.send", JSONObject().apply {
-            put("recipient_id", envelope.recipientId)
-            put("envelope", envelope.toJson())
-        })
+        send(messageSendFrame(envelope))
 
     /**
      * message.ack — delivery confirmation. CRITICAL: the server deletes the
      * stored envelope immediately upon receiving this (zero retention).
      */
     fun ackMessage(messageId: String): Boolean =
-        send("message.ack", JSONObject().put("message_id", messageId))
+        send(messageAckFrame(messageId))
 
-    /** message.burn — request early destruction of a message everywhere. */
-    fun burnMessage(messageId: String): Boolean =
-        send("message.burn", JSONObject().put("message_id", messageId))
+    /**
+     * message.burn — request early destruction of a message everywhere.
+     * [peerId] routes the burn notification to the other side.
+     */
+    fun burnMessage(messageId: String, peerId: String): Boolean =
+        send(messageBurnFrame(messageId, peerId))
 
-    fun typingStart(recipientId: String): Boolean =
-        send("typing.start", JSONObject().put("recipient_id", recipientId))
+    fun typingStart(peerId: String): Boolean = send(typingFrame(started = true, peerId = peerId))
 
-    fun typingStop(recipientId: String): Boolean =
-        send("typing.stop", JSONObject().put("recipient_id", recipientId))
-
-    fun presenceUpdate(online: Boolean): Boolean =
-        send("presence.update", JSONObject().put("online", online))
+    fun typingStop(peerId: String): Boolean = send(typingFrame(started = false, peerId = peerId))
 
     // -- internals --------------------------------------------------------------
 
-    private fun send(type: String, payload: JSONObject): Boolean {
-        val frame = JSONObject().apply {
-            put("type", type)
-            put("payload", payload)
-        }
-        return webSocket?.send(frame.toString()) ?: false
-    }
+    private fun send(frame: JSONObject): Boolean =
+        webSocket?.send(frame.toString()) ?: false
 
     private fun openSocket() {
         val token = currentToken ?: return
@@ -158,9 +176,12 @@ class WsClient(
         webSocket = null
         previous?.close(CLOSE_NORMAL, null)
         _connectionState.value = ConnectionState.CONNECTING
+        diag("ws[$reconnectAttempts]: firing WS /ws handshake")
         val request = Request.Builder()
             .url(wsUrl)
-            .header("Authorization", "Bearer $token")
+            // The server's /ws middleware authenticates from THIS header (or a
+            // ?token= query param) — NOT Authorization, which it never reads.
+            .header("Sec-WebSocket-Protocol", token)
             .build()
         webSocket = client.newWebSocket(request, socketListener)
     }
@@ -172,21 +193,19 @@ class WsClient(
         override fun onOpen(webSocket: WebSocket, response: Response) {
             if (webSocket !== this@WsClient.webSocket) return
             reconnectAttempts = 0
+            diag("ws: connected")
             _connectionState.value = ConnectionState.CONNECTED
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
             if (webSocket !== this@WsClient.webSocket) return
-            // Frames carry only ciphertext envelopes and routing metadata.
-            // They are parsed and dispatched — NEVER logged.
-            val frame = runCatching { JSONObject(text) }.getOrNull() ?: return
-            val type = frame.optString("type")
-            val payload = frame.optJSONObject("payload") ?: JSONObject()
-            dispatch(type, payload)
+            dispatchFrame(text)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             if (webSocket !== this@WsClient.webSocket) return
+            // Close code only — a close reason is server/proxy-controlled text.
+            diag("ws: closed code=$code")
             _connectionState.value = ConnectionState.DISCONNECTED
             scheduleReconnect()
         }
@@ -195,12 +214,19 @@ class WsClient(
             if (webSocket !== this@WsClient.webSocket) return
             _connectionState.value = ConnectionState.DISCONNECTED
             // Deliberate teardown (disconnect/logout/delete) must never re-enter
-            // reconnect or re-auth.
+            // reconnect or re-auth — and an expected teardown isn't a failure
+            // worth a diagnostic line.
             if (intentionallyClosed) return
+            // Exception class + message + HTTP status only (same discrimination
+            // logic as the boot loop: pin failure vs TLS vs unreachable vs a
+            // handshake the server rejected) — never the token, URL, or body.
+            val status = response?.code?.let { " http_status=$it" }.orEmpty()
+            diag("ws: handshake/stream failed: ${t.javaClass.name}: ${t.message}$status")
             // A rejected token (JWTs live 15 min) would make every socket-level
             // retry a fresh 401 forever. Hand back to the coordinator to
             // re-authenticate instead of scheduling a doomed reconnect.
             if (response?.code == 401 || response?.code == 403) {
+                diag("ws: token rejected — handing off to re-auth")
                 intentionallyClosed = true
                 listener?.onAuthExpired()
             } else {
@@ -209,32 +235,42 @@ class WsClient(
         }
     }
 
-    private fun dispatch(type: String, payload: JSONObject) {
+    /**
+     * Parse one server frame and dispatch to [listener]. Fields sit flat next
+     * to "type" (see class kdoc). Frames carry only ciphertext envelopes and
+     * routing metadata; they are parsed and dispatched — NEVER logged.
+     * Internal (not private) so the frame contract is unit-testable.
+     */
+    internal fun dispatchFrame(text: String) {
+        val frame = runCatching { JSONObject(text) }.getOrNull() ?: return
         val l = listener ?: return
-        when (type) {
+        when (frame.optString("type")) {
             "message.deliver" -> {
-                payload.optJSONObject("envelope")?.let { envelopeJson ->
+                frame.optJSONObject("envelope")?.let { envelopeJson ->
                     runCatching { MessageEnvelope.fromJson(envelopeJson) }
                         .getOrNull()
                         ?.let(l::onMessageDeliver)
                 }
             }
-            "message.burned" -> l.onMessageBurned(payload.optString("message_id"))
-            "typing.start" -> l.onTyping(payload.optString("sender_id"), started = true)
-            "typing.stop" -> l.onTyping(payload.optString("sender_id"), started = false)
-            "presence.update" -> l.onPresence(
-                payload.optString("user_id"),
-                payload.optBoolean("online", false),
-            )
-            "prekey.low" -> l.onPreKeyLow(payload.optInt("remaining", 0))
+            // optString returns "" (not null) for a missing field — a malformed
+            // frame must be dropped here, not dispatched with empty ids (an
+            // empty peer id would e.g. pollute the typing-peers set).
+            "message.burned" -> frame.optString("message_id")
+                .takeIf { it.isNotEmpty() }?.let(l::onMessageBurned)
+            "typing.start" -> frame.optString("peer_id")
+                .takeIf { it.isNotEmpty() }?.let { l.onTyping(it, started = true) }
+            "typing.stop" -> frame.optString("peer_id")
+                .takeIf { it.isNotEmpty() }?.let { l.onTyping(it, started = false) }
+            // A real low-stock event always carries "remaining" (the server
+            // serializes it even at 0 — non-nil pointer beats omitempty);
+            // absent means malformed, and a spurious dispatch would trigger a
+            // needless prekey upload.
+            "prekey.low" -> if (frame.has("remaining")) l.onPreKeyLow(frame.optInt("remaining", 0))
             "session.revoked" -> {
                 intentionallyClosed = true
                 l.onSessionRevoked()
             }
-            "error" -> l.onServerError(
-                payload.optString("code", "unknown"),
-                payload.optString("message", ""),
-            )
+            "error" -> l.onServerError(frame.optString("code", "unknown"), "")
         }
     }
 
@@ -253,5 +289,24 @@ class WsClient(
         private const val CLOSE_NORMAL = 1000
         private const val BASE_BACKOFF_MS = 1_000L
         private const val MAX_BACKOFF_MS = 60_000L
+
+        // Outbound frame builders — pure functions, extracted so the wire shape
+        // (flat fields, exact snake_case names — see class kdoc) is
+        // unit-testable against the server contract without a socket.
+
+        internal fun messageSendFrame(envelope: MessageEnvelope): JSONObject =
+            JSONObject().put("type", "message.send").put("envelope", envelope.toJson())
+
+        internal fun messageAckFrame(messageId: String): JSONObject =
+            JSONObject().put("type", "message.ack").put("message_id", messageId)
+
+        internal fun messageBurnFrame(messageId: String, peerId: String): JSONObject =
+            JSONObject().put("type", "message.burn")
+                .put("message_id", messageId)
+                .put("peer_id", peerId)
+
+        internal fun typingFrame(started: Boolean, peerId: String): JSONObject =
+            JSONObject().put("type", if (started) "typing.start" else "typing.stop")
+                .put("peer_id", peerId)
     }
 }

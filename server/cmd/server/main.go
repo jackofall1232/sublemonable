@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os/signal"
@@ -54,7 +55,24 @@ func main() {
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: false,
 		BodyLimit:             512 * 1024,
+		// Preserve intentional HTTP statuses (fiber.ErrUnauthorized /
+		// fiber.ErrUpgradeRequired from the /ws middleware below). Flattening
+		// everything to 500 made an auth-rejected WebSocket handshake
+		// indistinguishable from a server bug: clients key their re-auth
+		// logic off 401/403, and a 500 sent them into a blind reconnect loop
+		// instead. Bodies stay generic codes — never error internals.
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			var fe *fiber.Error
+			if errors.As(err, &fe) && fe.Code < fiber.StatusInternalServerError {
+				code := "error"
+				switch fe.Code {
+				case fiber.StatusUnauthorized:
+					code = "unauthorized"
+				case fiber.StatusUpgradeRequired:
+					code = "upgrade_required"
+				}
+				return c.Status(fe.Code).JSON(fiber.Map{"error": code})
+			}
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "internal"})
 		},
 	})
@@ -90,12 +108,22 @@ func main() {
 			return fiber.ErrUpgradeRequired
 		}
 		token := c.Get("Sec-WebSocket-Protocol")
-		if token == "" {
+		fromHeader := token != ""
+		if !fromHeader {
 			token = c.Query("token")
 		}
 		accountID, err := issuer.ValidateAccessToken(token)
 		if err != nil {
 			return fiber.ErrUnauthorized
+		}
+		// RFC 6455 §4.1: a browser that offered a subprotocol MUST close the
+		// connection when the server's 101 doesn't select one. Echo the token
+		// back (the upgrader forwards a pre-set response header as the selected
+		// subprotocol), or web clients drop the socket right after the
+		// handshake. Only when the client actually offered it — selecting a
+		// subprotocol a query-param client never requested is equally fatal.
+		if fromHeader {
+			c.Set("Sec-WebSocket-Protocol", token)
 		}
 		c.Locals("ws_account_id", accountID)
 		return c.Next()

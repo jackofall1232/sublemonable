@@ -2,6 +2,34 @@
 
 ## Next
 
+- [ ] **iOS: SAME two WebSocket defects Android had in ≤v1.5.3 — messaging cannot work on
+      iOS until fixed** (found in Run 16, confirmed by inspection of
+      `apps/ios/Sources/Networking/WebSocketClient.swift`; deliberately NOT half-fixed
+      in the Android-focused Run 16):
+      1. Handshake sends the JWT as `Authorization: Bearer` (`openSocket(token:)`), which
+         the server's `/ws` middleware never reads → handshake rejected. Fix like
+         Android/web: `Sec-WebSocket-Protocol` header (Starscream: set the header on the
+         `URLRequest`), or the documented `?token=` native fallback.
+      2. Frames use the nested `OutboundFrame{type, payload}` shape and inbound decoding
+         reads `payload.*` — the server speaks FLAT frames only
+         (server/internal/ws/hub.go, packages/protocol/src/events.ts). `message.burn`
+         also needs `peer_id`, typing uses `peer_id`. Mirror Android's Run 16 fix
+         (`WsClient.kt` + `WsClientFrameTest.kt` are the reference).
+      (iOS additionally still has the 33-byte `.serialize()` registration-key issue —
+      see the earlier item below.)
+- [ ] **Deploy the Run 16 server fixes** (`server/cmd/server/main.go`): 4xx pass-through
+      (WS auth failures now 401, was 500 "internal") + `Sec-WebSocket-Protocol` echo —
+      the echo is REQUIRED for browser web clients to hold a WS connection at all
+      (RFC 6455 §4.1), so web real-time delivery is broken in production until this
+      deploys. Same safe-deploy pattern as Run 14 (rollback tag, isolated-port smoke,
+      only the `server` compose service).
+- [ ] **Cut + ship Android v1.5.4** (vc6, Run 16 WS fixes + send-path diagnostics): CI
+      release build (R8!), on-device smoke — register, add contact, SEND A MESSAGE both
+      directions, and check Settings → Diagnostics shows the new `ws:`/`send:` lines.
+      Then flip website /download/beta. Note deploy-order independence: the v1.5.4
+      client works against both the current and the fixed server (OkHttp doesn't need
+      the subprotocol echo).
+
 - [x] ~~BLOCKING registration end-to-end: server must verify XEdDSA
       signatures, not plain Ed25519~~ — **resolved in Run 14**
       (`claude/server-xeddsa-verification`, not yet merged to `main`).

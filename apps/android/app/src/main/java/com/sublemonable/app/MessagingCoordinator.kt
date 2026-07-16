@@ -47,16 +47,18 @@ import kotlin.math.min
  * on a capped backoff so a transient outage at unlock time can't strand the
  * account unregistered and offline forever (see [start]).
  *
- * The ONE exception to the no-logging rule is boot-stage transport
- * diagnostics in [bootstrapLoop]: fixed stage/milestone markers (e.g.
- * "firing POST /api/v1/register", "session minted") and the transport
- * exception class/message on failure (connect errors, HTTP status codes,
- * certificate-pin mismatches). All of these strings are compile-time
- * constants or exception metadata — no message content, keys, tokens,
- * account ids, or envelope fields ever flow through them, so nothing
- * sensitive can leak. Without it, a certificate-pinning failure or a dead
- * relay is indistinguishable from airplane mode — the app retries forever
- * with no signal anywhere, client or server.
+ * The ONE exception to the no-logging rule is transport diagnostics: the
+ * boot-stage markers in [bootstrapLoop], the socket-lifecycle lines in
+ * [WsClient], and the send-path stage markers in [sendText] (e.g.
+ * "firing POST /api/v1/register", "session minted", "X3DH session
+ * established") plus the transport exception class/message on failure
+ * (connect errors, HTTP status codes, certificate-pin mismatches). All of
+ * these strings are compile-time constants or exception metadata — no
+ * message content, keys, tokens, account ids, or envelope fields ever flow
+ * through them, so nothing sensitive can leak. Without it, a
+ * certificate-pinning failure or a dead relay is indistinguishable from
+ * airplane mode — the app retries forever with no signal anywhere, client
+ * or server (v1.5.3 shipped exactly that failure on the send path).
  *
  * Each such line goes to logcat AND to [BootDiagnostics] (an app-private,
  * capped, on-device file surfaced in Settings → Diagnostics), so a user with
@@ -116,7 +118,14 @@ class MessagingCoordinator(
     init {
         ws.listener = this
         // Local burns (burn-on-read / burn-all) propagate to the other side.
-        messages.onMessageBurned = { message -> ws.burnMessage(message.id) }
+        // The server routes the burn by peer_id, so resolve the conversation's
+        // contact; a burn for an already-removed conversation has no peer to
+        // notify and is dropped.
+        messages.onMessageBurned = { message ->
+            conversations.find(message.conversationId)?.let { conversation ->
+                ws.burnMessage(message.id, conversation.contactId)
+            }
+        }
     }
 
     /**
@@ -243,7 +252,6 @@ class MessagingCoordinator(
     fun stop() {
         _linking.value = false
         linkJob?.cancel()
-        ws.presenceUpdate(online = false)
         ws.disconnect()
     }
 
@@ -258,12 +266,25 @@ class MessagingCoordinator(
         diagnostics.record(line)
     }
 
-    /** Encrypt-then-send. X3DH session is established lazily on first send. */
+    /**
+     * Encrypt-then-send. X3DH session is established lazily on first send.
+     *
+     * Send-path stages mirror the boot loop's diagnostics: stage markers on
+     * the (rare) first-message session setup, and stage + exception metadata
+     * on any failure. Before this, every failure here was swallowed silently
+     * by the runCatching — a dead prekey fetch or a failed X3DH looked
+     * identical to the user simply never having tapped send.
+     */
     fun sendText(conversation: Conversation, text: String, ttlSeconds: Int?, burnOnRead: Boolean) {
         scope.launch {
             val accountId = api.accountId ?: return@launch
+            // Stage marker for the diagnostic log in onFailure below.
+            // Stage names only — never data.
+            var stage = "check-session"
             runCatching {
                 if (!signal.hasSession(conversation.contactId)) {
+                    stage = "fetch-prekey-bundle"
+                    diag("send: no session — firing GET prekey bundle")
                     val bundle = api.fetchPreKeyBundle(conversation.contactId)
                     val pinned = conversation.pinnedIdentityKeyBase64
                     if (pinned != null && pinned != bundle.identityKeyBase64) {
@@ -272,14 +293,18 @@ class MessagingCoordinator(
                         // key-substitution attempt — refuse to establish the
                         // session or send, and raise the warning badge instead
                         // of silently trusting the relay's key.
+                        diag("send: identity key mismatch — send refused, warning raised")
                         conversations.flagIdentityMismatch(conversation.contactId)
                         return@launch
                     }
+                    stage = "establish-session"
                     signal.establishSession(conversation.contactId, bundle)
+                    diag("send: X3DH session established")
                     conversations.upsert(
                         conversation.copy(contactIdentityKeyBase64 = bundle.identityKeyBase64),
                     )
                 }
+                stage = "encrypt"
                 val encrypted = signal.encrypt(conversation.contactId, text.toByteArray(Charsets.UTF_8))
                 val envelope = MessageEnvelope(
                     id = UUID.randomUUID().toString(),
@@ -311,13 +336,27 @@ class MessagingCoordinator(
                 messages.addOutgoing(local)
                 conversations.onOutgoingMessage(conversation.id)
 
+                stage = "ws-send"
                 if (ws.sendMessage(envelope)) {
                     // The protocol has no sender-side delivery receipt event,
                     // so the sender's TTL clock starts at hand-off — the
                     // conservative choice (never outlives the recipient copy
                     // by more than transit time).
                     messages.markDelivered(envelope.id)
+                } else {
+                    // Socket not open: the message stays local in SENDING.
+                    // Connection state only — never the envelope.
+                    diag("send: hand-off failed — socket not open (${ws.connectionState.value})")
                 }
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
+                // Same discrimination logic as the boot loop: exception class +
+                // message + the server's {"error": code} body when present —
+                // never message content, keys, or ids.
+                val bodySuffix = (e as? ApiClient.ApiException)?.responseBody
+                    ?.let { " server_error=$it" }
+                    .orEmpty()
+                diag("send: failed at stage=$stage: ${e.javaClass.name}: ${e.message}$bodySuffix")
             }
         }
     }
@@ -384,10 +423,6 @@ class MessagingCoordinator(
         } else {
             _typingPeers.value - senderId
         }
-    }
-
-    override fun onPresence(userId: String, online: Boolean) {
-        // Presence is intentionally not surfaced in v1 UI.
     }
 
     override fun onPreKeyLow(remaining: Int) {

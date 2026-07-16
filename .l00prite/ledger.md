@@ -1991,3 +1991,128 @@ Install the v1.5.3 build, unlock, then open Settings → Diagnostics and read th
 
 Report that line back and the correct fix (pin rotation / shipped-pin update /
 Caddyfile `reuse_private_keys` / TLS config) follows without further guessing.
+
+---
+
+### Run 16 — 2026-07-16T12:29:48Z — claude (message-send diagnostics + root cause)
+- **Goal:** (1) Extend the v1.5.3 BootDiagnostics-style logging to the message-send /
+  WebSocket path (which had zero instrumentation — the send failure was exactly as invisible
+  as registration was before Run 10). (2) Find the actual root cause of messages never
+  sending ("Connecting…" forever, no diagnostics lines).
+- **Triggering event:** none — direct task instructions.
+- **Reviewer/comment reference:** none.
+- **Decision:** Normal work. Root cause was established with live evidence BEFORE any fix
+  was written (local server build + protocol probe), per the registration-investigation
+  discipline.
+- **Completed work — ROOT CAUSE (three independent defects, all proven live):**
+  1. **Android WS handshake could never authenticate.** `WsClient` sent the JWT as
+     `Authorization: Bearer` on the `/ws` upgrade; the server's `/ws` middleware
+     (server/cmd/server/main.go) reads ONLY `Sec-WebSocket-Protocol` or `?token=` — it never
+     looks at Authorization. Proven by running the real server locally (Postgres 16 +
+     RSA keys + real binary) and a Go probe that registered two accounts and attempted all
+     three handshakes: Authorization-header → FAILED; subprotocol → 101; query param → 101.
+     Compounding it: the Fiber ErrorHandler flattened the middleware's
+     `fiber.ErrUnauthorized` to **500 "internal"**, so Android's 401/403 → `onAuthExpired`
+     re-auth path could never trigger — `WsClient.onFailure` saw 500 and silently
+     `scheduleReconnect()`-looped forever. UI: `_linking=true` + DISCONNECTED/CONNECTING →
+     permanent "Connecting…", zero log lines (nothing in the WS path was instrumented).
+     This also explains why boot diagnostics showed success ("session minted, socket
+     handshake handed off") and then NOTHING.
+  2. **Android WS frame shape has never matched the server.** Android (and iOS!) send
+     nested `{type, payload:{…}}` frames; the server (internal/ws/hub.go `clientEvent`) and
+     packages/protocol/src/events.ts define FLAT frames (fields sit next to `type`), which
+     is what web sends. Proven live: nested `message.send` → server replied
+     `{"type":"error","code":"bad_envelope"}`; flat frame → delivered end-to-end to the
+     second connected account. So even with a fixed handshake, sends would still have
+     failed. Also: server `message.burn` requires `peer_id` (Android sent none), typing
+     signals use `peer_id` (Android sent `recipient_id`), and Android's inbound dispatch
+     read `payload.*` so every server event (incl. `message.deliver`) would have been
+     dropped. Provenance: sublemonable-MASTER.json `websocket_events` documents event
+     NAMES only, no frame shape — the native clients guessed one shape, the server+web
+     implemented another. Same class of unvalidated-wire-contract drift as Run 12's
+     registration encoding bug (structural risk already in todos.md).
+  3. **Server never echoed `Sec-WebSocket-Protocol`** (fasthttp upgrader with no
+     `Subprotocols` config + nothing pre-set on the response). OkHttp/gorilla tolerate
+     that, but RFC 6455 §4.1 makes browsers DROP the socket after the 101 when their
+     offered subprotocol isn't selected — so browser-web real-time delivery could never
+     have worked against this server either. (Web registration/REST was unaffected.)
+  - **Docker-compose env-var angle from the task: RULED OUT.** `/ws` is registered
+    unconditionally in main.go — not gated by TOR_/ONION_/RELAY_* env vars
+    (`RelayEnabled()` gates only `/relay/forward`; the onion mirror gates only static
+    content). The compose file publishes the Go server directly (no fronting proxy to
+    misconfigure for upgrades).
+- **Fix implemented:**
+  - `apps/android/.../net/WsClient.kt`: JWT now rides `Sec-WebSocket-Protocol` (matches
+    server + keeps token out of URLs); ALL frames flattened to the canonical contract
+    (out: message.send/ack/burn(+peer_id)/typing(peer_id)/presence; in: flat parse for
+    deliver/burned/typing/prekey.low/session.revoked/error); frame builders extracted as
+    internal pure functions for unit testing; socket-lifecycle diagnostics added (fired /
+    connected / closed code / failure with exception class+message+http_status / 401→
+    re-auth hand-off) via an injected `diag` lambda.
+  - `apps/android/.../MessagingCoordinator.kt`: `sendText` now stage-tracked
+    (check-session → fetch-prekey-bundle → establish-session → encrypt → ws-send) with
+    the boot-loop's exact diag pattern: milestones for the rare X3DH first-send path,
+    `failed at stage=… <class>: <message> [server_error=…]` on any failure, an identity-
+    mismatch refusal line, and a hand-off-failed line when the socket isn't open. Burn
+    propagation now resolves the conversation's contactId for the required peer_id.
+  - `apps/android/.../SublemonableApp.kt`: BootDiagnostics constructed before WsClient;
+    WsClient wired to the same `Log.w("SublemonableBoot")` + `BootDiagnostics.record`
+    channel. DiagnosticsScreen copy updated (covers send path now). proguard-rules
+    comment updated — new lines are Log.w, NOT stripped by the release logging policy
+    (the Run-10 R8 lesson re-checked deliberately).
+  - `server/cmd/server/main.go`: ErrorHandler preserves intentional 4xx (`fiber.Error`)
+    so `/ws` auth failures return 401 (bodies stay generic codes); `/ws` middleware echoes
+    the offered subprotocol back (and correctly does NOT when the token came via query
+    param — selecting an un-offered protocol is equally fatal for browsers).
+  - Version bump 1.5.3/vc5 → 1.5.4/vc6; CHANGELOG Unreleased entries (3 fixes + 1 added).
+- **Changed files:** apps/android/.../net/WsClient.kt, MessagingCoordinator.kt,
+  SublemonableApp.kt, ui/screens/DiagnosticsScreen.kt, proguard-rules.pro,
+  build.gradle.kts; NEW test WsClientFrameTest.kt; server/cmd/server/main.go;
+  CHANGELOG.md; .l00prite/{ledger,todos}.md. Deliberately untouched: iOS (same two WS
+  defects — recorded in todos.md, NOT silently half-fixed), web client (needs only the
+  server echo fix), packages/protocol (already canonical).
+- **Tests run / Verification:**
+  - `go vet ./... && go test ./...` (server) — exit 0, all packages pass —
+    2026-07-16T12:23Z.
+  - Live protocol probe vs local REAL server build (before fix): Authorization-header
+    handshake FAILED http_status=500; subprotocol 101; query 101; nested frame →
+    `error bad_envelope`; flat frame → delivered. (Probe was a temp
+    `server/cmd/wsprobe`, removed after use; transcript in session log.)
+  - Live probe vs FIXED server: Authorization-header → **401** (was 500); subprotocol
+    101 **echoed=true**; query 101 echoed=false (correct); flat frame delivered.
+  - Android: no SDK in this environment (dl.google.com proxy-403, as every prior run),
+    so Gradle/AGP can't run. Instead: the changed pure-JVM files (WsClient,
+    MessageEnvelope, new test) compiled with standalone kotlin-compiler-embeddable
+    1.9.24 against the project's exact dep versions (okhttp 4.12.0, coroutines 1.8.1,
+    org.json) — exit 0; `WsClientFrameTest` run under JUnit 4.13.2 — **8/8 pass**;
+    plus a live smoke of the REAL compiled WsClient class against the local fixed
+    server — connected via subprotocol, flat message.send delivered end-to-end
+    between two real registered accounts, and bad-token case fired the new diag lines
+    (`handshake/stream failed … http_status=401`, `token rejected — handing off to
+    re-auth`) with `onAuthExpired` invoked and NO token in any line — ALL PASSED,
+    2026-07-16T12:27Z. MessagingCoordinator/SublemonableApp edits could not be
+    compiled here (Android deps) — reviewed manually; CI compiles the module.
+- **Response drafted/sent:** none (no PR opened per instructions — branch push only).
+- **Event status:** not applicable.
+- **Failures:** live relay unreachable from this sandbox (CONNECT 403), so production
+  behavior is inferred from code + local build of the same code; pkill/session quirks
+  cost a few shell retries; nothing else.
+- **Decisions:**
+  - Android authenticates the WS with `Sec-WebSocket-Protocol` (not `?token=`): keeps
+    the JWT out of URLs/proxy logs; OkHttp does not require the echo, so it works
+    against BOTH the currently-deployed server and the fixed one (deploy-order safe).
+  - Server 4xx pass-through kept minimal (401/426 mapped to generic codes) — no other
+    handler relies on the ErrorHandler (REST uses errJSON directly).
+- **Confidence:** High for the diagnosis (every claim reproduced against a real server
+  build, before and after). High for the Android fix correctness at the protocol level
+  (real-class smoke test). Medium for "messages now work on-device end-to-end" until a
+  real device build runs — but if anything else is wrong, Settings → Diagnostics will
+  now SAY what, which was Part 1's whole point.
+- **Next action:** merge + deploy server (subprotocol echo + 401 pass-through), cut
+  v1.5.4 Android release, then port the same two WS fixes to iOS
+  (WebSocketClient.swift: Authorization header + nested payload frames — both defects
+  confirmed present by inspection this run).
+- **Do-not-retry notes:** don't test the live relay from the coding sandbox (proxy 403,
+  policy); don't run Gradle/AGP here (dl.google.com 403); `pkill -f` with the binary
+  name in the command line kills your own shell — use exact-match or task kill.
+- **Lock:** none.

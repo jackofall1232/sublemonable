@@ -45,9 +45,11 @@
 # Release logging policy: strip verbose/debug/info AND wtf defensively (the
 # codebase uses none by policy; wtf in particular is noisy and can trigger
 # extra platform reporting). ONLY Log.w / Log.e survive minification — and
-# deliberately so: the boot transport diagnostics in MessagingCoordinator
-# (tag "SublemonableBoot") log at Log.w — fixed stage/milestone markers +
-# transport exception text only, never user data — and stripping them made a
+# deliberately so: ALL transport diagnostics (tag "SublemonableBoot") log at
+# Log.w — the boot stages in MessagingCoordinator, the send-path stages in
+# sendText, and the WebSocket lifecycle lines WsClient emits through
+# AppContainer's diag lambda. Fixed stage/milestone markers + transport
+# exception text only, never user data. Stripping them made a
 # certificate-pinning failure or dead relay completely unobservable in release
 # builds (no client log, no server contact), which is exactly the failure mode
 # they exist to diagnose.
