@@ -87,13 +87,10 @@ class WsClientFrameTest {
         assertFalse(start.has("payload"))
     }
 
-    @Test
-    fun `presence frame is flat`() {
-        val frame = WsClient.presenceFrame(online = true)
-        assertEquals("presence.update", frame.getString("type"))
-        assertTrue(frame.getBoolean("online"))
-        assertFalse(frame.has("payload"))
-    }
+    // presence.update is deliberately not implemented (no frame builder, no
+    // dispatch): the canonical event is an encrypted signal Android does not
+    // yet produce, and the server drops every presence frame today (its
+    // relay routes by a peer_id the presence event does not define).
 
     // ── inbound (server → client) ─────────────────────────────────────────────
 
@@ -108,7 +105,6 @@ class WsClientFrameTest {
         override fun onMessageDeliver(envelope: MessageEnvelope) { delivered = envelope }
         override fun onMessageBurned(messageId: String) { burnedId = messageId }
         override fun onTyping(senderId: String, started: Boolean) { typing = senderId to started }
-        override fun onPresence(userId: String, online: Boolean) {}
         override fun onPreKeyLow(remaining: Int) { preKeyRemaining = remaining }
         override fun onSessionRevoked() { revoked = true }
         override fun onAuthExpired() {}

@@ -34,11 +34,17 @@ import kotlin.math.min
  *                    {"type":"message.ack","message_id":...}
  *                    {"type":"message.burn","message_id":...,"peer_id":...}
  *                    {"type":"typing.start"/"typing.stop","peer_id":...}
- *                    {"type":"presence.update","online":...}
  *  server -> client: {"type":"message.deliver","envelope":{...}}
  *                    {"type":"message.burned","message_id":...,"peer_id":...}
  *                    {"type":"prekey.low","remaining":...}
  *                    {"type":"session.revoked"} / {"type":"error","code":...}
+ *
+ * presence.update is deliberately NOT implemented here: the canonical event
+ * carries an encrypted ciphertext signal Android does not yet produce, and
+ * the server's relaySignal drops every presence frame today regardless of
+ * client (it routes by a peer_id the presence event does not define) — so a
+ * stub would only pin a dead, wrong shape. Rebuild it against the canonical
+ * encrypted-signal shape when presence lands in the UI.
  *
  * Handshake auth: the JWT rides the Sec-WebSocket-Protocol request header —
  * the only header the server's /ws middleware reads (an Authorization header
@@ -72,8 +78,6 @@ class WsClient(
         fun onMessageBurned(messageId: String)
 
         fun onTyping(senderId: String, started: Boolean)
-
-        fun onPresence(userId: String, online: Boolean)
 
         /** Server-side one-time prekey stock is low — upload another batch. */
         fun onPreKeyLow(remaining: Int)
@@ -156,8 +160,6 @@ class WsClient(
     fun typingStart(peerId: String): Boolean = send(typingFrame(started = true, peerId = peerId))
 
     fun typingStop(peerId: String): Boolean = send(typingFrame(started = false, peerId = peerId))
-
-    fun presenceUpdate(online: Boolean): Boolean = send(presenceFrame(online))
 
     // -- internals --------------------------------------------------------------
 
@@ -259,9 +261,6 @@ class WsClient(
                 .takeIf { it.isNotEmpty() }?.let { l.onTyping(it, started = true) }
             "typing.stop" -> frame.optString("peer_id")
                 .takeIf { it.isNotEmpty() }?.let { l.onTyping(it, started = false) }
-            "presence.update" -> frame.optString("peer_id")
-                .takeIf { it.isNotEmpty() }
-                ?.let { l.onPresence(it, frame.optBoolean("online", false)) }
             // A real low-stock event always carries "remaining" (the server
             // serializes it even at 0 — non-nil pointer beats omitempty);
             // absent means malformed, and a spurious dispatch would trigger a
@@ -309,8 +308,5 @@ class WsClient(
         internal fun typingFrame(started: Boolean, peerId: String): JSONObject =
             JSONObject().put("type", if (started) "typing.start" else "typing.stop")
                 .put("peer_id", peerId)
-
-        internal fun presenceFrame(online: Boolean): JSONObject =
-            JSONObject().put("type", "presence.update").put("online", online)
     }
 }

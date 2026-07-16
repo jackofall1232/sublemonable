@@ -252,7 +252,6 @@ class MessagingCoordinator(
     fun stop() {
         _linking.value = false
         linkJob?.cancel()
-        ws.presenceUpdate(online = false)
         ws.disconnect()
     }
 
@@ -424,10 +423,6 @@ class MessagingCoordinator(
         } else {
             _typingPeers.value - senderId
         }
-    }
-
-    override fun onPresence(userId: String, online: Boolean) {
-        // Presence is intentionally not surfaced in v1 UI.
     }
 
     override fun onPreKeyLow(remaining: Int) {

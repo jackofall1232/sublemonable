@@ -22,8 +22,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `{"error":"bad_envelope"}` and every inbound `message.deliver` was dropped client-side (verified
   live against a local server build). All outbound frames are now flat (`message.burn` gained the
   required `peer_id`; typing events use `peer_id` not `recipient_id`) and inbound parsing reads
-  flat fields. New unit tests pin the wire contract. **iOS has the same two defects and is NOT
-  fixed by this change** (tracked in `.l00prite/todos.md`).
+  flat fields. New unit tests pin the wire contract. Android's non-functional `presence.update`
+  stub was removed outright rather than reshaped: the canonical event is an encrypted signal
+  Android does not yet produce, and the server currently drops every presence frame from every
+  client (its relay routes signals by a `peer_id` the presence event does not define), so a stub
+  could only pin a dead, wrong shape. **iOS has the same two defects and is NOT fixed by this
+  change** (tracked in `.l00prite/todos.md`).
 - **Server: `/ws` auth failures returned 500 instead of 401.** The Fiber error handler flattened
   every error — including the `/ws` middleware's `fiber.ErrUnauthorized` — to
   `500 {"error":"internal"}`, so clients could not distinguish an expired/rejected token (fixable
