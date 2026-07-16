@@ -7,6 +7,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Android: messages never sent — the WebSocket handshake could not authenticate.** The v1.5.3
+  Android client presented its JWT in an `Authorization: Bearer` header on the `/ws` upgrade, but
+  the server's `/ws` middleware only reads `Sec-WebSocket-Protocol` (or a `?token=` query param) —
+  so every handshake was rejected and the app sat on "Connecting…" forever, silently retrying.
+  Verified against a local server build: the exact Android handshake fails, the subprotocol and
+  query-param handshakes succeed. The client now sends the token via `Sec-WebSocket-Protocol`,
+  matching the web client and the server contract.
+- **Android: WebSocket frames used a nested `{type, payload}` shape the server has never spoken.**
+  The server (server/internal/ws/hub.go) and packages/protocol/src/events.ts define FLAT frames —
+  fields sit next to `type`. Even with a fixed handshake, every `message.send` earned
+  `{"error":"bad_envelope"}` and every inbound `message.deliver` was dropped client-side (verified
+  live against a local server build). All outbound frames are now flat (`message.burn` gained the
+  required `peer_id`; typing events use `peer_id` not `recipient_id`) and inbound parsing reads
+  flat fields. New unit tests pin the wire contract. **iOS has the same two defects and is NOT
+  fixed by this change** (tracked in `.l00prite/todos.md`).
+- **Server: `/ws` auth failures returned 500 instead of 401.** The Fiber error handler flattened
+  every error — including the `/ws` middleware's `fiber.ErrUnauthorized` — to
+  `500 {"error":"internal"}`, so clients could not distinguish an expired/rejected token (fixable
+  by re-authenticating) from a server fault, and blind-reconnected forever. Intentional 4xx
+  statuses now pass through.
+- **Server: `/ws` never echoed the `Sec-WebSocket-Protocol` back.** RFC 6455 §4.1 requires the
+  echo when a client offers a subprotocol; browsers enforce it and drop the socket right after an
+  otherwise-successful 101, so the web client's real-time delivery could never work in a browser.
+  The middleware now echoes the offered subprotocol (and correctly does NOT when the token arrived
+  via query param).
+
+### Added
+
+- **Android: send-path and socket-lifecycle diagnostics (Settings → Diagnostics).** The same
+  privacy-safe logging that covered registration (v1.5.3) now covers what happens after: WebSocket
+  handshake fired/connected/closed/failed (exception class + message + HTTP status), the token-
+  rejected → re-auth hand-off, and every message-send stage (prekey-bundle fetch, X3DH session
+  establishment, encrypt, socket hand-off) with stage name + exception metadata on failure. No
+  message content, keys, tokens, or account IDs — fixed markers and exception metadata only. The
+  send path previously swallowed every failure silently; a dead prekey fetch was indistinguishable
+  from never having tapped send.
+
 ## [1.5.3] - 2026-07-15
 
 ### Added

@@ -6,6 +6,7 @@
 package com.sublemonable.app
 
 import android.app.Application
+import android.util.Log
 import com.sublemonable.app.crypto.EncryptedSignalProtocolStore
 import com.sublemonable.app.crypto.KeyStoreManager
 import com.sublemonable.app.crypto.SignalProtocolManager
@@ -59,14 +60,22 @@ class AppContainer(private val app: Application) {
     private var httpClient =
         CertificatePinning.buildClient(torEnabled = settingsRepository.settings.value.torEnabled)
 
+    /** On-device, adb-free connection diagnostics (Settings → Diagnostics). */
+    val bootDiagnostics = BootDiagnostics(app)
+
     val apiClient = ApiClient(API_BASE_URL, httpClient, keyStoreManager)
-    val wsClient = WsClient(WS_URL, httpClient, scope)
+
+    // WsClient shares the coordinator's diagnostic channel (logcat tag +
+    // on-device log) so socket-lifecycle failures land in Settings →
+    // Diagnostics next to the boot-stage lines. Privacy-safe by the same
+    // rule: fixed markers + exception metadata only.
+    val wsClient = WsClient(WS_URL, httpClient, scope) { line ->
+        Log.w("SublemonableBoot", line)
+        bootDiagnostics.record(line)
+    }
 
     val messageRepository = MessageRepository(scope)
     val conversationRepository = ConversationRepository()
-
-    /** On-device, adb-free boot diagnostics (Settings → Diagnostics). */
-    val bootDiagnostics = BootDiagnostics(app)
 
     val coordinator = MessagingCoordinator(
         appContext = app,

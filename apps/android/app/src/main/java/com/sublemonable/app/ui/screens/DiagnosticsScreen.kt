@@ -123,10 +123,10 @@ fun DiagnosticsScreen(
         }
 
         Text(
-            text = "A local record of the app's attempts to register and connect to the " +
-                "relay. Privacy-safe: boot stage names plus error type and message — never " +
-                "message content, keys, tokens, or your account ID. Copy it into a bug " +
-                "report if you're stuck on “Connecting…”.",
+            text = "A local record of the app's attempts to register, connect, and send " +
+                "over the relay. Privacy-safe: stage names plus error type and message — " +
+                "never message content, keys, tokens, or your account ID. Copy it into a " +
+                "bug report if you're stuck on “Connecting…” or a message won't send.",
             style = MaterialTheme.typography.bodySmall,
             color = TextMuted,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
