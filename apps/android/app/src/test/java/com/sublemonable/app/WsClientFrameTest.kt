@@ -154,9 +154,14 @@ class WsClientFrameTest {
         val ws = clientWith(listener)
         ws.dispatchFrame("not json")
         ws.dispatchFrame("""{"type":"unknown.event","message_id":"m1"}""")
-        // The old nested shape must no longer be understood either.
+        // The old nested shape must no longer be understood either — dropped
+        // entirely, never dispatched with an empty id.
         ws.dispatchFrame("""{"type":"message.burned","payload":{"message_id":"m1"}}""")
+        ws.dispatchFrame("""{"type":"typing.start","payload":{"recipient_id":"p1"}}""")
+        ws.dispatchFrame("""{"type":"prekey.low"}""")
         assertNull(listener.delivered)
-        assertEquals("", listener.burnedId ?: "")
+        assertNull(listener.burnedId)
+        assertNull(listener.typing)
+        assertNull(listener.preKeyRemaining)
     }
 }

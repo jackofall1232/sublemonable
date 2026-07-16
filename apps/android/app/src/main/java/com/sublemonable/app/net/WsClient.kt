@@ -250,14 +250,23 @@ class WsClient(
                         ?.let(l::onMessageDeliver)
                 }
             }
-            "message.burned" -> l.onMessageBurned(frame.optString("message_id"))
-            "typing.start" -> l.onTyping(frame.optString("peer_id"), started = true)
-            "typing.stop" -> l.onTyping(frame.optString("peer_id"), started = false)
-            "presence.update" -> l.onPresence(
-                frame.optString("peer_id"),
-                frame.optBoolean("online", false),
-            )
-            "prekey.low" -> l.onPreKeyLow(frame.optInt("remaining", 0))
+            // optString returns "" (not null) for a missing field — a malformed
+            // frame must be dropped here, not dispatched with empty ids (an
+            // empty peer id would e.g. pollute the typing-peers set).
+            "message.burned" -> frame.optString("message_id")
+                .takeIf { it.isNotEmpty() }?.let(l::onMessageBurned)
+            "typing.start" -> frame.optString("peer_id")
+                .takeIf { it.isNotEmpty() }?.let { l.onTyping(it, started = true) }
+            "typing.stop" -> frame.optString("peer_id")
+                .takeIf { it.isNotEmpty() }?.let { l.onTyping(it, started = false) }
+            "presence.update" -> frame.optString("peer_id")
+                .takeIf { it.isNotEmpty() }
+                ?.let { l.onPresence(it, frame.optBoolean("online", false)) }
+            // A real low-stock event always carries "remaining" (the server
+            // serializes it even at 0 — non-nil pointer beats omitempty);
+            // absent means malformed, and a spurious dispatch would trigger a
+            // needless prekey upload.
+            "prekey.low" -> if (frame.has("remaining")) l.onPreKeyLow(frame.optInt("remaining", 0))
             "session.revoked" -> {
                 intentionallyClosed = true
                 l.onSessionRevoked()
