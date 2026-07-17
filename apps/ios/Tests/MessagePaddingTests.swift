@@ -58,4 +58,16 @@ final class MessagePaddingTests: XCTestCase {
         let legacy = Data("hello from a pre-padding client".utf8)
         XCTAssertNil(MessagePadding.unpadOrNil(legacy))
     }
+
+    /// A real padded blob is always a non-empty multiple of blockBytes, so
+    /// anything else must fall through as legacy — even with a plausible
+    /// length prefix (a NUL-prefixed legacy message must not be truncated
+    /// to a zero-length "unpadded" result).
+    func testNonBlockMultipleIsLegacyEvenWithPlausiblePrefix() {
+        var blob = Data([0x00, 0x00, 0x00, 0x05])
+        blob.append(Data(repeating: 0x41, count: 296))  // 300 bytes total
+        XCTAssertNil(MessagePadding.unpadOrNil(blob))
+        let nulPrefixedLegacy = Data([0x00, 0x00, 0x00, 0x00]) + Data("text".utf8)
+        XCTAssertNil(MessagePadding.unpadOrNil(nulPrefixedLegacy))
+    }
 }

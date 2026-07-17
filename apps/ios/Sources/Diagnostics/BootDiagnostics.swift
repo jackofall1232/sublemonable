@@ -26,8 +26,16 @@ public final class BootDiagnostics: ObservableObject {
 
     /// Recorded lines, oldest-first / most-recent-last. The Diagnostics
     /// screen observes this so a connection attempt made while the screen is
-    /// open shows up live.
+    /// open shows up live. Main-thread-published SNAPSHOT of `localEntries` —
+    /// never read or written off-main.
     @Published public private(set) var entries: [String] = []
+
+    /// The authoritative entry list, confined to `queue`. Kept separate from
+    /// the `@Published` mirror so successive `record()` calls compose on the
+    /// serial queue instead of racing the main-thread publication (two rapid
+    /// records reading the same stale published value would silently drop
+    /// the earlier line — e.g. the handshake stage right before a failure).
+    private var localEntries: [String] = []
 
     private let fileURL: URL?
     // Serializes file IO + entry mutation; record() is called from arbitrary
@@ -65,9 +73,10 @@ public final class BootDiagnostics: ObservableObject {
         let stamped = "\(Self.timestampFormatter.string(from: Date()))  \(line)"
         queue.async { [weak self] in
             guard let self else { return }
-            let next = Array((self.entries + [stamped]).suffix(Self.maxEntries))
-            self.persist(next)
-            DispatchQueue.main.async { self.entries = next }
+            self.localEntries = Array((self.localEntries + [stamped]).suffix(Self.maxEntries))
+            self.persist(self.localEntries)
+            let snapshot = self.localEntries
+            DispatchQueue.main.async { self.entries = snapshot }
         }
     }
 
@@ -75,6 +84,7 @@ public final class BootDiagnostics: ObservableObject {
     public func clear() {
         queue.async { [weak self] in
             guard let self else { return }
+            self.localEntries = []
             if let fileURL = self.fileURL {
                 // Truncate first so a failed delete can't resurrect entries.
                 try? Data().write(to: fileURL)
@@ -91,11 +101,12 @@ public final class BootDiagnostics: ObservableObject {
               let text = try? String(contentsOf: fileURL, encoding: .utf8) else { return }
         let lines = text.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
         let capped = Array(lines.suffix(Self.maxEntries))
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            // Persisted lines predate anything recorded this launch.
-            self.entries = Array((capped + self.entries).suffix(Self.maxEntries))
-        }
+        // Persisted lines predate anything recorded this launch. init()
+        // enqueues this before any record() can land, but merge defensively
+        // anyway rather than assume ordering.
+        localEntries = Array((capped + localEntries).suffix(Self.maxEntries))
+        let snapshot = localEntries
+        DispatchQueue.main.async { [weak self] in self?.entries = snapshot }
     }
 
     private func persist(_ lines: [String]) {

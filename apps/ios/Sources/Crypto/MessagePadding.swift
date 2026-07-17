@@ -50,12 +50,19 @@ public enum MessagePadding {
 
     /// Recovers the original plaintext, or nil when `padded` is not a valid
     /// padded block (legacy unpadded sender — caller uses the bytes as-is).
+    ///
+    /// A real padded blob is ALWAYS a non-empty multiple of `blockBytes`
+    /// (see `pad`), so anything else is legacy text by construction —
+    /// checked first, which shrinks the aliasing surface to legacy messages
+    /// that are an exact block multiple AND begin with a plausible length
+    /// prefix. Length parsing is `UInt32` (not `Int`) so an MSB-set prefix
+    /// can never overflow-trap; the bounds guard then rejects it.
     public static func unpadOrNil(_ padded: Data) -> Data? {
-        guard padded.count >= lenPrefixBytes else { return nil }
+        guard padded.count >= blockBytes, padded.count % blockBytes == 0 else { return nil }
         let bytes = [UInt8](padded.prefix(lenPrefixBytes))
-        let length = (Int(bytes[0]) << 24) | (Int(bytes[1]) << 16)
-            | (Int(bytes[2]) << 8) | Int(bytes[3])
-        guard length >= 0, length <= padded.count - lenPrefixBytes else { return nil }
-        return padded.subdata(in: lenPrefixBytes..<(lenPrefixBytes + length))
+        let length = (UInt32(bytes[0]) << 24) | (UInt32(bytes[1]) << 16)
+            | (UInt32(bytes[2]) << 8) | UInt32(bytes[3])
+        guard length <= UInt32(padded.count - lenPrefixBytes) else { return nil }
+        return padded.subdata(in: lenPrefixBytes..<(lenPrefixBytes + Int(length)))
     }
 }

@@ -39,6 +39,14 @@ import Starscream
 ///
 /// `message.ack` is the contractual trigger for SERVER-SIDE DELETION: the
 /// instant we acknowledge delivery, the server purges its envelope copy.
+///
+/// Threading: all mutable state is main-thread-confined by construction —
+/// Starscream delivers delegate events on its `callbackQueue`, which
+/// defaults to `.main` and is never changed here; `connect()` hops to the
+/// MainActor before `openSocket`; and every caller (`MessageStore`,
+/// `AppEnvironment`) is `@MainActor`. If a non-main call site is ever
+/// added, revisit this (e.g. annotate the class `@MainActor`) rather than
+/// relying on the invariant silently.
 public final class WebSocketClient: NSObject {
     public enum Outbound {
         case messageSend(MessageEnvelope)
