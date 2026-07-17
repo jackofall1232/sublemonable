@@ -12,6 +12,9 @@ import LibSignalClient
 //
 //   IdentityKeyPair.generate()                       — identity generation
 //   PrivateKey.generate() / .publicKey / .serialize  — Curve25519 keys
+//   PublicKey.keyBytes                               — RAW 32-byte key (no
+//                                                      0x05 tag): the wire
+//                                                      form for upload/QR
 //   PrivateKey.generateSignature(message:)           — XEdDSA; verifiable as a
 //                                                      standard Ed25519
 //                                                      signature (login challenge)
@@ -40,6 +43,24 @@ public enum SignalManagerError: Error {
     case invalidEnvelope
     case untrustedIdentity
     case bundleUnavailable
+}
+
+// MARK: - Wire-format key encoding
+
+/// libsignal serializes Curve25519 public keys as the raw 32-byte key
+/// prefixed with a 1-byte DJB type tag (0x05) — 33 bytes total. The server's
+/// wire contract carries the RAW 32-byte key only (`db/schema.sql`,
+/// `docs/SECURITY_MODEL.md` "Key types"; the register handler rejects any
+/// other length with `bad_identity_key`). Android hit exactly this mismatch —
+/// fixed in PR #21 via `getPublicKeyBytes()` / `ECPublicKey.fromPublicKeyBytes`;
+/// the Swift equivalents are `PublicKey.keyBytes` for encoding and, since the
+/// Swift API has no raw-bytes initializer, re-prefixing the type tag before
+/// `PublicKey.init` for decoding. See .l00prite/ledger.md Runs 12/13.
+private let djbTypeTag: [UInt8] = [0x05]
+
+/// Reconstructs a libsignal `PublicKey` from the raw 32-byte wire form.
+private func publicKeyFromRawBytes(_ raw: Data) throws -> PublicKey {
+    try PublicKey(djbTypeTag + Array(raw))
 }
 
 /// Protocol-state store backed by KeychainStore. Never returns key material
@@ -284,12 +305,15 @@ public final class SignalManager {
         store.hasIdentity && accountID != nil
     }
 
-    /// Serialized public identity key (0x05-prefixed Curve25519), for
-    /// registration upload, QR exchange, and safety numbers.
+    /// RAW 32-byte Curve25519 public identity key (no 0x05 type tag), for
+    /// registration upload, QR exchange, and safety numbers. All three
+    /// surfaces must use the same representation the server stores and
+    /// Android/web publish, or cross-platform safety numbers would never
+    /// match — see the wire-format note at the top of this file.
     public func localIdentityPublicKey() throws -> Data {
         try queue.sync {
             let pair = try store.identityKeyPair(context: NullContext())
-            return Data(pair.identityKey.serialize())
+            return Data(pair.publicKey.keyBytes)
         }
     }
 
@@ -306,7 +330,9 @@ public final class SignalManager {
             let signed = try generateSignedPreKeyLocked(identity: identity)
             let oneTime = try generateOneTimePreKeysLocked(count: Self.oneTimePreKeyBatchSize)
             return RegistrationKeys(
-                identityKey: Data(identity.identityKey.serialize()).base64EncodedString(),
+                // Raw 32 bytes — the server rejects the 33-byte serialize()
+                // form with 400 bad_identity_key (Android PR #21 bug class).
+                identityKey: Data(identity.publicKey.keyBytes).base64EncodedString(),
                 registrationID: Int(try store.localRegistrationId(context: context)),
                 signedPreKey: signed,
                 oneTimePreKeys: oneTime
@@ -333,7 +359,7 @@ public final class SignalManager {
             try store.storePreKey(record, id: UInt32(nextID), context: context)
             uploads.append(OneTimePreKeyUpload(
                 id: nextID,
-                publicKey: Data(privateKey.publicKey.serialize()).base64EncodedString()
+                publicKey: Data(privateKey.publicKey.keyBytes).base64EncodedString()
             ))
             nextID += 1
         }
@@ -363,6 +389,16 @@ public final class SignalManager {
         let privateKey = PrivateKey.generate()
         // The signed prekey's public key is signed by the identity key —
         // recipients verify provenance before running X3DH against it.
+        //
+        // The signature covers the 33-byte serialize() form (type tag
+        // included), NOT the raw 32-byte wire form uploaded below: a
+        // receiving peer's processPreKeyBundle reconstructs the key and
+        // verifies against ITS serialize() output (standard libsignal
+        // convention), and the server's XEdDSA check re-prefixes the tag
+        // before verifying for the same reason (signedPrekeyMessage() in
+        // server/internal/api/handlers.go). Signing the raw form instead
+        // would break every peer-to-peer session — Android made exactly
+        // that mistake once (ledger Run 13, finding 3).
         let signature = identity.privateKey.generateSignature(
             message: privateKey.publicKey.serialize()
         )
@@ -379,7 +415,7 @@ public final class SignalManager {
                          biometricProtected: false)
         return SignedPreKeyUpload(
             id: id,
-            publicKey: Data(privateKey.publicKey.serialize()).base64EncodedString(),
+            publicKey: Data(privateKey.publicKey.keyBytes).base64EncodedString(),
             signature: Data(signature).base64EncodedString()
         )
     }
@@ -405,18 +441,23 @@ public final class SignalManager {
             if let oneTime = response.oneTimePreKey,
                let bytes = Data(base64Encoded: oneTime.publicKey) {
                 oneTimeID = UInt32(oneTime.id)
-                oneTimeKey = try PublicKey(Array(bytes))
+                oneTimeKey = try publicKeyFromRawBytes(bytes)
             }
 
+            // The bundle carries RAW 32-byte keys (the same form register
+            // uploads) — re-prefix the type tag before handing them to
+            // libsignal, which only deserializes the 33-byte form. Decoding
+            // them as serialize() output would fail for every peer registered
+            // by a fixed client (Android's establishSession bug, ledger Run 13).
             let bundle = try PreKeyBundle(
                 registrationId: UInt32(response.registrationID),
                 deviceId: Self.deviceID,
                 prekeyId: oneTimeID,
                 prekey: oneTimeKey,
                 signedPrekeyId: UInt32(response.signedPreKey.id),
-                signedPrekey: try PublicKey(Array(signedKeyBytes)),
+                signedPrekey: try publicKeyFromRawBytes(signedKeyBytes),
                 signedPrekeySignature: Array(signatureBytes),
-                identity: try IdentityKey(bytes: Array(identityBytes))
+                identity: IdentityKey(publicKey: try publicKeyFromRawBytes(identityBytes))
             )
             // X3DH: verifies the signed-prekey signature and installs the
             // initiating session into our SessionStore.
