@@ -2240,3 +2240,98 @@ message between two devices) remains the outstanding manual step.
 2. iOS: apply the Android-equivalent fixes (raw 32-byte key encoding + WS
    subprotocol auth + flat frames) before expecting iOS to work at all.
 3. Pre-launch DB cleanup pass (test accounts from Runs 14 + 16).
+
+## Run 17 — iOS port of the #21/#23 fixes (+#24 conformance) on branch; /download beta link unhidden (2026-07-17)
+
+Two workstreams this run, per operator instruction (executed after an
+explicit pause while PR #24 merged from another session).
+
+### Workstream 1 — iOS client brought onto the working wire contract
+Branch `claude/ios-key-encoding-ws-fixes` (3 commits, pushed). PR could NOT
+be opened via API — the box PAT has contents:write but not
+pull_requests:write (same class of limit as Run 14's missing gh). Open it
+manually: https://github.com/jackofall1232/sublemonable/pull/new/claude/ios-key-encoding-ws-fixes
+
+Both target bugs CONFIRMED present on iOS by inspection before fixing (not
+assumed from Android's symptoms):
+
+1. **Key encoding (PR #21 class)** — `SignalManager.swift` used the 33-byte
+   `serialize()` form for identity/signed-prekey/one-time uploads (its own
+   doc comment said "0x05-prefixed") and decoded bundle keys expecting the
+   same form. Fixed: `PublicKey.keyBytes` (raw 32) for upload/QR/safety
+   numbers; bundle decode re-prefixes the 0x05 tag (Swift API verified
+   against the real v0.56.0 source — it has `keyBytes` but NO
+   `fromPublicKeyBytes`, so tag-prefixing is the reconstruction path).
+   Signed-prekey signature still covers `serialize()` — Android's final
+   Run-13 convention; server + peers both verify against that form.
+2. **WebSocket (PR #23 class)** — `WebSocketClient.swift` sent
+   `Authorization: Bearer` (server never reads it) and spoke nested
+   `{type, payload}` frames both directions. Fixed: token via
+   `Sec-WebSocket-Protocol`; flat frames per hub.go; `message.burn` gains
+   the required `peer_id` (both call sites had the conversation UUID in
+   scope); dead `presence.update` REMOVED (server drops peer_id-less
+   presence — same reasoning as Android's removal); 401/403 upgrade
+   rejection → `onAuthExpired` → app refreshes session (login fallback)
+   and reconnects, instead of reconnect-looping a dead 15-min JWT.
+   Starscream 4.0.6 verified from source: forwards the custom header
+   verbatim, surfaces upgrade failure as
+   `HTTPUpgradeError.notAnUpgrade(status, headers)`, does not require the
+   subprotocol echo.
+3. **#24 conformance (scope addition — merged mid-task, changed the
+   plaintext contract):** without it, fixed-iOS would render Android's
+   padded messages as garbage and read receipts as JSON blobs. Added
+   `MessagePadding.swift` (byte-compatible port), pad-on-send /
+   unpad-with-legacy-fallback on receive, and swallow+ack of
+   `receipt.read` control payloads (same strict discriminator as
+   `parseReadReceipt`). iOS does NOT send receipts — recorded in todos.
+4. **Diagnostics (task item 5):** full port of BootDiagnostics +
+   Diagnostics screen (Settings → Network → Connection diagnostics), wired
+   through boot stages (the previously silent `catch`), WS lifecycle, and
+   send path. `APIClient` errors now carry the server's fixed-vocabulary
+   schema code (`server_error=bad_identity_key` style) — the Run-12 lesson.
+
+**Verified here (no macOS/Xcode on this box — explicit):**
+- `swiftc -parse` clean on all 11 changed/created files (swift:5.10 Docker).
+- Behavioral harness (Linux Swift, logic extracted verbatim): outbound
+  frames flat/snake_case per hub.go; server-shaped inbound frames decode;
+  padding round-trips AND interops with the canonical JS scheme in BOTH
+  directions; receipt discriminator matches on 7 cases.
+- `[0x05]+keyBytes` reconstruction proven byte-identical to
+  `ECPublicKey.fromPublicKeyBytes` AND the original serialized key over
+  200 real libsignal keys (vendored 0.46.0 jar — same Rust core the Swift
+  0.56 package binds).
+
+**NOT verified — needs a Mac + device:** Xcode build (XcodeGen + SwiftPM
+resolution), the two new XCTest files, SwiftUI/type-level integration, and
+the real end-to-end: register → contact-add → message round-trip against a
+v1.5.4+ Android peer. There is NO iOS CI job (checked ci.yml — no
+macos/xcode anywhere), so merge review should treat compile status as
+unknown, not green. Recommend adding a macOS build job with this PR.
+
+### Workstream 2 — /download → /download/beta discoverability (main)
+Operator confirmed the missing link was DELIBERATE during the bug-hunt
+phase (broken builds shouldn't be discoverable) and that phase is over.
+Commit `191e2b1` on main: version-agnostic "Available now" card in
+/download's iOS/Android section linking to the /download/beta slug — no
+version/checksum on /download (operator-specified; those live on the beta
+page, which is byte-untouched, all pre-release warnings intact). Also
+wrapped the overlong ANDROID_BETA_SHA256 line Run 16's flip left behind
+(prettier). Verified: prettier + tsc + full Next build green; /download and
+/download/beta both prerender. Live-page verification recorded below when
+the Vercel deploy lands.
+**Onion mirror check (task 3):** the mirror is a SINGLE templated page —
+onion.go serves only `/` and `/index.html` via renderIndex plus static
+assets; the download section is inline. No top-level/beta split exists, so
+no equivalent discoverability fix applies. No mirror change made.
+
+### Also this run
+- Recorded the operator's 5 post-core-messaging roadmap items in todos.md
+  (I2P client wiring, media sending, decoy accounts/traffic, dead-drop QR,
+  web read receipts) — recorded only, none implemented, per instruction.
+
+### Next action
+1. Someone with a Mac: open the PR from the pushed branch, build, run the
+   new tests, and on-device test iOS register/contact-add/messaging against
+   an Android v1.5.4+ peer. iOS still ships NO release until that passes.
+2. Consider a macOS CI job so iOS compile status stops being unknowable
+   from this box.

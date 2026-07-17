@@ -138,6 +138,44 @@ they need real infrastructure access, signing keys, and a human decision point:
 - [ ] Release keystore offline backup — flagged in an earlier review, still outstanding. Same
       caveat: not documented elsewhere in this repo, carried forward per explicit instruction.
 
+## Post-core-messaging roadmap (recorded 2026-07-17, per operator instruction)
+
+Core registration + Android↔Android messaging confirmed working end-to-end as
+of today. These are NOT blocking bugs — they're known gaps, recorded here so a
+future session understands why each is scoped the way it is. Do not start any
+of them without an explicit task.
+
+- [ ] **I2P client wiring (Android).** Infrastructure/plumbing exists (Docker
+      overlay, server env vars, `/healthz` reports the B32 dest) but the
+      Android client has NEVER implemented I2P — `TransportState.I2P` is a
+      skeleton enum value that is never emitted (confirmed again 2026-07-17).
+      This needs real client-side work (an embeddable router/SDK — see the
+      "In-process I2P on mobile" entry under Known Gaps below), not just
+      enabling a flag. Desktop/server I2P is real and live; mobile is not.
+- [ ] **Image/media sending.** Currently text-only end to end. No attachment
+      support exists anywhere in the pipeline (envelope `media_type` values
+      "image"/"file" are defined on the wire but nothing produces or renders
+      them). Needs upload/encryption/chunking design, not a UI-only change.
+- [ ] **Decoy accounts / decoy message traffic.** Per the original blueprint
+      this is its own dedicated design phase, not started (foreground decoy
+      scheduler exists in `packages/relay-client` for web; account-level decoys
+      and mobile cover traffic do not). Do NOT attempt before the core
+      protocol is fully hardened and stable — explicitly sequenced after
+      protocol hardening by the operator.
+- [ ] **Dead-drop QR flow.** The QR/link contact-add that shipped is DIRECT
+      exchange (`ContactExchangePayload` — account id + identity key), not the
+      anonymous dead-drop model from the original architecture. The dead-drop
+      token QR (Ghost-mode messaging capability, `packages/crypto/deaddrop.ts`)
+      needs its own design/build phase. Do not conflate the two — see the
+      matching warning under Known Gaps below.
+- [ ] **Web-side read receipts.** Deferred per Codex review on PR #24 (receipts
+      shipped Android-side; web only recognizes-and-swallows). Blocked on first
+      verifying Android↔web cross-client messaging interop works AT ALL — the
+      two sides run different Double Ratchet implementations (libsignal vs the
+      custom TS ratchet in `packages/crypto`) and that interop has never been
+      exercised. iOS receipts are likewise swallow-only as of the iOS port
+      branch (`claude/ios-key-encoding-ws-fixes`).
+
 ## Later — build-injection follow-up found this session
 
 - [ ] `apps/desktop/src-tauri/build.rs` correctly bakes `RELAY_ONION_ADDRESS` in via
