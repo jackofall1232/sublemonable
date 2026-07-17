@@ -168,6 +168,15 @@ of them without an explicit task.
       token QR (Ghost-mode messaging capability, `packages/crypto/deaddrop.ts`)
       needs its own design/build phase. Do not conflate the two — see the
       matching warning under Known Gaps below.
+- [ ] **Padding unpad parity (Android + web).** PR #25 review hardened iOS's
+      `MessagePadding.unpadOrNil` to require a non-empty exact multiple of 256
+      bytes before parsing the length prefix (a NUL-prefixed legacy message
+      could otherwise be truncated to empty). Android's `MessagePadding.
+      unpadOrNull` and web's `packages/crypto/src/padding.ts` `unpad` have the
+      same theoretical aliasing surface — apply the same block-multiple guard
+      there for cross-platform parity. Low urgency: only affects legacy
+      (pre-#24) unpadded messages that begin with NUL/control bytes, which
+      real UTF-8 text doesn't.
 - [ ] **Web-side read receipts.** Deferred per Codex review on PR #24 (receipts
       shipped Android-side; web only recognizes-and-swallows). Blocked on first
       verifying Android↔web cross-client messaging interop works AT ALL — the
