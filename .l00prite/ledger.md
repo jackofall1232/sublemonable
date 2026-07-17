@@ -2364,3 +2364,73 @@ no equivalent discoverability fix applies. No mirror change made.
   build-verified ≠ device-verified. The Mac build + two-device test vs an
   Android v1.5.4+ peer remains the real acceptance gate before any iOS
   release.
+
+## Run 18 — "three decorative Settings toggles" root-caused: fixed-but-never-released; v1.5.5-beta cut and shipped (2026-07-17)
+
+Trigger: operator report from live two-device testing — "Default disappearing
+timer", "Burn on read by default", and "Send read receipts" all behave
+identically toggled on vs off.
+
+### Root cause — ONE cause for all three symptoms, established before any fix
+
+**Every build the devices could have been running predates the fix.** All
+three toggles were wired by PR #24 (`7ba6ecf`, merged 2026-07-17 15:30 UTC,
+another session) — but v1.5.4, the latest release, was cut from `c42d2b4`
+at 14:08 UTC, ONE commit before #24 merged. The `1.5.4-beta-working` branch
+is byte-identical to that state (verified: `git merge-base --is-ancestor
+7ba6ecf` fails for it). No release containing #24 existed. Merged ≠
+deployed, again — the exact confusion this ledger exists to prevent.
+
+Per-toggle underlying defects (all pre-#24, per #24 + code inspection):
+1. **Default disappear timer** — the setting was a one-shot seed of
+   per-chat saveable compose-bar state that nothing re-read; a restored
+   stale snapshot shadowed it. #24: compose bar derives live effective
+   values (`ttlOverrideIndex ?: ttlOptions.indexOf(defaultTtlSeconds)`),
+   per-message override wins (ChatScreen.kt:96-97, fed live from
+   MainActivity:277-278).
+2. **Burn-on-read default** — same one-shot-seed bug, same fix
+   (`burnOnReadOverride ?: defaultBurnOnRead`).
+3. **Send read receipts** — the preference existed but NO consuming code
+   existed anywhere, either side of the wire. #24 built the feature:
+   `markRead` → gate on `settings.readReceipts` → `sendReadReceipt()` as
+   an encrypted control payload INSIDE an ordinary message envelope
+   (server-blind — the relay cannot distinguish a receipt from text);
+   receive side parses `ControlPayload.parseReadReceipt` → `onPeerRead` →
+   sent/read indicator on outgoing bubbles.
+
+**Padding sequencing (task item 5): satisfied by construction.** #24
+shipped `MessagePadding` (256-byte blocks) and receipts in the SAME
+commit; `sendReadReceipt` pads before encrypting (MessagingCoordinator
+~:449, with the exact "can't fingerprint the receipt" comment). No
+unpadded receipt generation was ever released — v1.5.5-beta is the first
+release with receipts at all.
+
+### Verification on this box (no devices here)
+- `:app:testDebugUnitTest` on merged main — BUILD SUCCESSFUL (incl. #24's
+  MessageRepositoryTest/ControlPayloadTest/MessagePaddingTest).
+- Wiring confirmed by reading the actual consuming code paths (above),
+  not the #24 commit message.
+
+### Shipped
+- `53fac23` — versionName 1.5.5 / versionCode 7; CHANGELOG retro-filed
+  the missing [1.5.4] section (the v1.5.4 cut never sectioned
+  [Unreleased]) and added [1.5.5-beta] covering #24/#26/#25.
+- **v1.5.5-beta released** via `scripts/release-android-on-box.sh` from
+  `53fac23`: signed (cert continuity verified by the script), vc7/1.5.5
+  confirmed in-artifact via aapt2, GitHub prerelease published. SHA-256
+  `e6eeded98d0e867d690bb76ccce68d4cff4806e711196e4662aac0d14c157d4c`
+  confirmed three ways (GitHub server digest / script / local sha256sum).
+- `d5dd7c3` — links.ts + onion-site/SHA256SUMS flipped (content diff
+  inspected; prettier + tsc green).
+- Both onion mirrors verified serving v1.5.5-beta via Host-gate, and the
+  mirror-route APK download matches the checksum byte-for-byte. Clearnet
+  live-page check recorded below once Vercel lands.
+
+### Remains for the operator (cannot be done from this box)
+Install v1.5.5-beta on BOTH devices (updates in place — same signing
+cert), then re-run the toggle matrix: (1) default timer ON → new messages
+carry the timer with no per-message toggling, OFF → they don't; (2)
+burn-on-read default likewise; (3) receipts ON both sides → sender's
+bubble gains the read indicator when the recipient opens the chat, OFF →
+no indicator and no receipt sent. Until that passes, the fixes are
+"released", not "verified working" — same three-way distinction as ever.
