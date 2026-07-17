@@ -7,6 +7,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.5-beta] - 2026-07-17
+
+### Fixed
+
+- **Android: the three Settings toggles that did nothing now function.** "Default disappearing
+  timer" and "Burn on read by default" were one-shot seeds of per-chat saveable compose-bar state
+  that nothing re-read — a restored stale snapshot shadowed the setting and the send path never
+  consulted it. The compose bar now derives live effective values (per-message override, else the
+  current setting), so toggling a default actually changes what gets sent. "Send read receipts"
+  toggled a stored preference no code consumed on either side of the wire — see Added.
+- **Android: burn-on-read burned the instant a message rendered in an open chat.** It now stays
+  readable for a 5-second grace window after first view, then burns and notifies the sender — the
+  propagated burn doubling as the read confirmation is the design intent, so the delay applies on
+  both devices.
+
+### Added
+
+- **Android: read receipts, server-blind.** Receipts ride INSIDE ordinary encrypted message
+  envelopes as control payloads (`packages/protocol/src/receipts.ts`) — on the wire a receipt is
+  indistinguishable from conversation text, so the relay never learns read status, not even that a
+  receipt exists. Every plaintext (messages AND receipts) is padded to 256-byte blocks before
+  encryption so ciphertext length can't fingerprint a receipt either. Gated on the "Send read
+  receipts" setting, batched per chat-open, sent/read indicator on outgoing bubbles. Burn-on-read
+  messages never produce a receipt — their propagated burn signal is the read confirmation. The
+  web client recognizes and swallows receipt payloads; web-side receipt SENDING is deferred
+  pending cross-client interop verification.
+- **Android: branded notification sound with user override.**
+- **iOS: port of the Android registration key-encoding and WebSocket fixes + on-device
+  diagnostics** (raw 32-byte keys, `Sec-WebSocket-Protocol` auth, flat frames, plaintext padding,
+  receipt swallowing, Settings → Connection diagnostics). Parse- and harness-verified only — NOT
+  yet compiled with Xcode or tested on a device; no iOS release is cut from this.
+
+## [1.5.4] - 2026-07-17
+
 ### Fixed
 
 - **Android: messages never sent — the WebSocket handshake could not authenticate.** The v1.5.3
