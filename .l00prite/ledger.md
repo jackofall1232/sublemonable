@@ -2335,3 +2335,32 @@ no equivalent discoverability fix applies. No mirror change made.
    an Android v1.5.4+ peer. iOS still ships NO release until that passes.
 2. Consider a macOS CI job so iOS compile status stops being unknowable
    from this box.
+
+### Run 17 addendum — PR #25 review round + merge (2026-07-17)
+
+- PR #25 opened by the operator (box PAT lacked pull_requests:write; a
+  temporary PAT was provided for the review round and deleted after merge).
+- Review round (Gemini + Codex, 8 inline comments) — all verified against
+  the code before acting; fixes in `7b69795`:
+  - **BootDiagnostics race + lost-update (valid, real):** record() read
+    the @Published array on the background queue while writes landed on
+    main → rapid records could drop the earlier line. Fixed with a
+    queue-confined `localEntries` backing array; `entries` is now a
+    main-thread snapshot only.
+  - **MessagePadding hardening (valid):** UInt32 length parse (no
+    overflow trap on MSB-set prefixes) + unpad requires a non-empty exact
+    multiple of 256 before trusting the prefix (NUL-prefixed legacy text
+    can no longer truncate to empty). Test added; harness re-ran all-green
+    incl. the JS cross-impl checks. Android/web have the same theoretical
+    aliasing surface — parity todo recorded (`ed1afd5`).
+  - **@MainActor on WebSocketClient (declined with rationale):** state is
+    already main-confined by construction (Starscream callbackQueue
+    defaults to .main; connect() hops to MainActor; all callers are
+    @MainActor) — documented as an explicit invariant in the class doc
+    instead of a concurrency refactor this box cannot compile-verify.
+- All 8 threads replied to. **Merged to main as `64ce640` (#25).**
+- Standing caveat UNCHANGED by the merge: the iOS code has still never
+  been compiled with Xcode (no iOS CI job) or run on a device. Merge ≠
+  build-verified ≠ device-verified. The Mac build + two-device test vs an
+  Android v1.5.4+ peer remains the real acceptance gate before any iOS
+  release.
