@@ -9,12 +9,14 @@ import android.content.Context
 import android.util.Log
 import com.sublemonable.app.crypto.SignalProtocolManager
 import com.sublemonable.app.diagnostics.BootDiagnostics
+import com.sublemonable.app.data.ControlPayload
 import com.sublemonable.app.data.Conversation
 import com.sublemonable.app.data.ConversationRepository
 import com.sublemonable.app.data.Message
 import com.sublemonable.app.data.MessageEnvelope
 import com.sublemonable.app.data.MessageRepository
 import com.sublemonable.app.data.MessageState
+import com.sublemonable.app.data.SettingsRepository
 import com.sublemonable.app.net.ApiClient
 import com.sublemonable.app.net.WsClient
 import com.sublemonable.app.notifications.MessagingNotifications
@@ -72,6 +74,7 @@ class MessagingCoordinator(
     private val ws: WsClient,
     private val messages: MessageRepository,
     private val conversations: ConversationRepository,
+    private val settings: SettingsRepository,
     private val diagnostics: BootDiagnostics,
 ) : WsClient.Listener {
 
@@ -365,6 +368,67 @@ class MessagingCoordinator(
         if (started) ws.typingStart(conversation.contactId) else ws.typingStop(conversation.contactId)
     }
 
+    /**
+     * The chat screen reports the batch of incoming messages that just became
+     * visible. Read state is applied locally (which also arms the burn-on-read
+     * grace timers); when "Send read receipts" is enabled, ONE encrypted
+     * receipt envelope acknowledges the whole batch — a chat opened onto N
+     * unread messages costs a single send against the relay's rate limit, not
+     * N. Burn-on-read messages never produce a receipt: their delayed burn
+     * signal IS the read confirmation ([MessageRepository.markRead] returns
+     * false for them).
+     */
+    fun onMessagesSeen(conversation: Conversation, messageIds: List<String>) {
+        val newlyRead = messageIds.filter { messages.markRead(it) }
+        if (newlyRead.isEmpty()) return
+        if (!settings.settings.value.readReceipts) return
+        sendReadReceipt(conversation, newlyRead)
+    }
+
+    /**
+     * Encrypt-and-send a read receipt disguised as an ordinary message
+     * envelope — the relay cannot distinguish it from conversation text (see
+     * [ControlPayload] for the server-blind rationale). Receipts only ride an
+     * existing session: we just decrypted a message from this peer, so one
+     * exists; if it somehow doesn't, the receipt is skipped rather than
+     * establishing X3DH for a control signal.
+     */
+    private fun sendReadReceipt(conversation: Conversation, messageIds: List<String>) {
+        scope.launch {
+            val accountId = api.accountId ?: return@launch
+            runCatching {
+                if (!signal.hasSession(conversation.contactId)) return@launch
+                val plaintext = ControlPayload.readReceipt(messageIds)
+                val encrypted =
+                    signal.encrypt(conversation.contactId, plaintext.toByteArray(Charsets.UTF_8))
+                val envelope = MessageEnvelope(
+                    id = UUID.randomUUID().toString(),
+                    senderId = accountId,
+                    recipientId = conversation.contactId,
+                    ciphertext = encrypted.ciphertextBase64,
+                    ephemeralKey = encrypted.ephemeralKeyBase64,
+                    preKeyId = encrypted.preKeyId,
+                    messageNumber = encrypted.messageNumber,
+                    previousChainLength = 0,
+                    timestamp = DateTimeFormatter.ISO_INSTANT.format(Instant.now()),
+                    // Server-blindness: a receipt envelope must look exactly
+                    // like a text message — no TTL, no burn flag, text media.
+                    ttlSeconds = null,
+                    burnOnRead = false,
+                    mediaType = MessageEnvelope.MEDIA_TEXT,
+                )
+                if (!ws.sendMessage(envelope)) {
+                    // Best-effort: a receipt lost to a closed socket is not
+                    // retried. Connection state only — never the envelope.
+                    diag("receipt: hand-off failed — socket not open (${ws.connectionState.value})")
+                }
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
+                diag("receipt: failed: ${e.javaClass.name}: ${e.message}")
+            }
+        }
+    }
+
     /** Wipes the server account AND the local keys/messages. Irreversible. */
     fun deleteAccountAndWipe(onComplete: () -> Unit) {
         scope.launch {
@@ -388,12 +452,23 @@ class MessagingCoordinator(
                     ciphertextBase64 = envelope.ciphertext,
                     isPreKeyMessage = envelope.ephemeralKey != null,
                 )
+                val text = String(plaintext, Charsets.UTF_8)
+                // Read receipts ride inside ordinary envelopes (see
+                // ControlPayload) — recognize them BEFORE treating the payload
+                // as displayable conversation text. A receipt updates our
+                // outgoing copies, gets acked (so the server deletes its copy),
+                // and never bumps the conversation or fires a notification.
+                ControlPayload.parseReadReceipt(text)?.let { readIds ->
+                    readIds.forEach(messages::onPeerRead)
+                    ws.ackMessage(envelope.id)
+                    return@runCatching
+                }
                 val conversation = conversations.onIncomingMessage(envelope.senderId)
                 messages.addIncoming(
                     Message(
                         id = envelope.id,
                         conversationId = conversation.id,
-                        text = String(plaintext, Charsets.UTF_8),
+                        text = text,
                         isMine = false,
                         timestampMs = runCatching {
                             Instant.parse(envelope.timestamp).toEpochMilli()
