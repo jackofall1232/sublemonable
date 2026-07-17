@@ -2116,3 +2116,127 @@ Caddyfile `reuse_private_keys` / TLS config) follows without further guessing.
   policy); don't run Gradle/AGP here (dl.google.com 403); `pkill -f` with the binary
   name in the command line kills your own shell — use exact-match or task kill.
 - **Lock:** none.
+
+## Run 16 — PR #23 deployed to production, v1.5.4 shipped on all four surfaces, live E2E messaging PASS (2026-07-17)
+
+Trigger: operator instruction to establish ground truth (~2 days since PR #23,
+several sessions unrecorded here), then deploy/release only what verification
+showed was actually missing. Explicit framing: "merged," "deployed," and
+"verified working" are three different claims — this entry keeps them separate.
+
+### STEP 1 — ground truth (all verified against live state, not this ledger)
+
+1. **PR #23 merged:** YES — `c42d2b4` "Fix WebSocket authentication and frame
+   shape for message delivery (#23)", merged 2026-07-16 13:16 UTC. Changes:
+   Android `WsClient` (subprotocol auth + flat frames), `server/cmd/server/main.go`
+   (ErrorHandler passes intentional 4xx through — 401/upgrade_required no
+   longer flattened to 500; echoes `Sec-WebSocket-Protocol` when offered),
+   Android version bump to 1.5.4/vc6, `WsClientFrameTest`.
+2. **Local main:** was BEHIND origin/main by exactly that one commit — the box
+   had never pulled #23. (This ledger also had no Run entry for the #23
+   session at all; the merge happened out-of-band from a cloud session.)
+3. **Running server container:** PRE-#23, definitively. Image built
+   2026-07-15 20:13 UTC, container created 20:59 UTC — both ~17h BEFORE the
+   #23 merge. Behavioral proof, not just timestamps: a bad-token WS upgrade
+   against the live server returned `500 {"error":"internal"}` (the exact
+   pre-fix symptom) while a candidate build from `c42d2b4` returned
+   `401 {"error":"unauthorized"}`.
+4. **Android surfaces (pre-run):** consistent, all v1.5.3 — GitHub latest
+   release v1.5.3 (2026-07-15), live clearnet /download/beta v1.5.3 with
+   matching `96957f61…` checksum, both onion mirrors rendering
+   `sublemonable-v1.5.3.apk` with matching SHA256SUMS. No drift this time.
+   (A `v1.5.0-beta` string visible in the mirror page is the self-hosting
+   instructions' example text in the template — cosmetic, not drift.)
+
+### STEP 2 — deploy + release (all verified by artifact/behavior, not by exit codes)
+
+- Pulled main → `c42d2b4` (fast-forward).
+- **Server redeploy** (same reversible discipline as Run 14): rollback tag
+  `sublemonable-server:rollback-pre-ws401-20260717` preserved; candidate image
+  built from `c42d2b4`; smoke-tested on isolated `127.0.0.1:8446` (same
+  network/DB/mounts) BEFORE touching production: bad-token WS → 401; full
+  register(201) → session(200) → WS open via `Sec-WebSocket-Protocol` token
+  with RFC 6455 echo (Node 22's native WebSocket enforces the echo — open
+  succeeding IS the proof) → `message.send` A→B → `message.deliver` (id match)
+  → `message.ack`. Then deployed with the FULL three-file compose invocation
+  (constraints.md rule; the short form caused Run 14/15's regression):
+  `docker compose -f docker-compose.yml -f docker-compose.tor.yml -f
+  docker-compose.i2p.yml up -d server`. Post-deploy verification: container
+  runs the new image hash `614ea4a0…`; `config_files` label lists all three
+  files; all 7 ONION/I2P env vars present; live bad-token WS now 401; mirror
+  Host-gate still serves; `/healthz` ok.
+- **v1.5.4 release cut** via `scripts/release-android-on-box.sh` (versionName
+  1.5.4/vc6 was already bumped by #23 itself, so the tag assertion passed).
+  Build+sign succeeded; signer cert continuity verified by the script
+  (`6c7f92a7…892753`); artifact versionCode/Name verified via aapt2. GitHub
+  prerelease v1.5.4 published, targeting `c42d2b4`. APK SHA-256
+  `5ccb46226a669119a3740abdc658118b6df02239c2e645946265d47d38f591db`
+  confirmed THREE independent ways: GitHub's server-computed asset digest,
+  the script's own sha256sum, and a fresh local sha256sum of the staged file.
+- **Pointer flip** commit `8b599dd` (links.ts → v1.5.4 + new checksum;
+  onion-site/SHA256SUMS synced). The actual file-content diff was inspected
+  before committing (the commit-message-without-content failure mode from
+  earlier this week did not recur). Pushed to main.
+- **Live verification of all four surfaces (post-flip):**
+  - GitHub release: asset digest matches (above).
+  - Public + secret onion mirrors: fetched `/SHA256SUMS` over REAL Tor
+    circuits (disposable alpine+tor container on the compose network,
+    bootstrapped 100% — production tor container untouched, per the standing
+    do-not-retry note): both serve `5ccb4622…  sublemonable-v1.5.4.apk`; the
+    mirror-route APK download also matches byte-for-byte.
+  - Clearnet: `https://sublemonable.com/download/beta` fetched live after the
+    Vercel deploy — shows v1.5.4 and the `5ccb4622…` checksum.
+
+### STEP 3 — end-to-end messaging: VERIFIED at protocol level against production
+
+Harness (`ws-e2e.js`, web-style crypto per `packages/crypto/src/keys.ts`) run
+against `https://relay.sublemonable.com` (the real Caddy TLS path): two fresh
+accounts registered, sessions issued, both sockets authenticated via the
+subprotocol token with the server echoing it (the #23 fix), flat-frame
+`message.send` → `message.deliver` round-trip with matching envelope id, ack
+sent. **This is the first live production messaging round-trip recorded in
+this ledger.** Honest scope: this proves the SERVER side of #23 and the wire
+contract end-to-end; the Android v1.5.4 client binary itself was not run on
+any device from this box (no emulator/KVM). #23's own CI ran
+`WsClientFrameTest`, but on-device confirmation (install v1.5.4, send a real
+message between two devices) remains the outstanding manual step.
+
+### Merged / deployed / verified — the explicit ledger
+
+- #23 server fix: merged ✔ (2026-07-16) → deployed ✔ (this run, 2026-07-17)
+  → verified working live ✔ (401 behavior + subprotocol echo + round-trip).
+- #23 Android fix: merged ✔ → released as v1.5.4 on all four surfaces ✔ →
+  verified on-device ✘ (needs a human with a device; protocol-level proxy
+  verified only).
+- iOS: still carries BOTH the key-encoding bug (todos) and the two #23-class
+  WS client defects (per #23's own commit message) — nothing shipped for iOS.
+
+### Side effects / operational notes
+
+- Four throwaway test accounts added to the production DB this run (2 via the
+  candidate container — which shares the prod DB — and 2 via the live URL).
+  Harmless, no real users yet; add to the pre-launch cleanup pass.
+- **The release keystore password appeared once in this session's transcript**
+  (a redaction sed missed the `storepass = keypass = …` line format in
+  `/root/sublemonable-release-keystore-info.txt`). Same class as Run 14's
+  DATABASE_URL note: if the operator considers transcripts exposed, rotate —
+  though rotating a release-signing keystore password is low-urgency (the
+  keystore FILE is what matters, and it never left the box).
+- GITHUB_TOKEN was reused from the operator's own bash history (most recent
+  release invocation) — never printed. Keystore password piped to the
+  script's stdin prompt — the script's env-var handling kept it out of argv.
+- Image tags now on the box: `latest` (= #23 fix, live),
+  `rollback-pre-ws401-20260717` (pre-#23 — keep until trusted, then delete),
+  `rollback-pre-xeddsa-20260715T195138Z` (older; safe to delete now that two
+  releases have shipped past it).
+- `i2p-test-client` container is STILL running (todos cleanup item from
+  Run 5) — left alone this run, still pending an explicit decision.
+
+### Next action
+
+1. Human on-device test of v1.5.4: install (updates in place — same signing
+   cert), register or reuse identity, exchange messages between two devices;
+   Settings → Diagnostics now shows the WS/send-path stages if anything fails.
+2. iOS: apply the Android-equivalent fixes (raw 32-byte key encoding + WS
+   subprotocol auth + flat frames) before expecting iOS to work at all.
+3. Pre-launch DB cleanup pass (test accounts from Runs 14 + 16).
