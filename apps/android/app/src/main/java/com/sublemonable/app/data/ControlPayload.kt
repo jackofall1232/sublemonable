@@ -17,7 +17,9 @@ import org.json.JSONObject
  * message.burn works) would tell the relay exactly when messages are read;
  * riding message.send instead also gives receipts the same store-and-forward
  * guarantee as messages, so a sender who is offline when their message is
- * read still gets the receipt on reconnect.
+ * read still gets the receipt on reconnect. The serialized payload is padded
+ * like any message plaintext before encryption (see MessagePadding), so
+ * ciphertext length cannot fingerprint a receipt either.
  *
  * Wire shape (canonical cross-client definition:
  * packages/protocol/src/receipts.ts):

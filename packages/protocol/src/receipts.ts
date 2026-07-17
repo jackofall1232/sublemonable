@@ -15,7 +15,10 @@
  * receipt on reconnect.
  *
  * Clients recognize receipts AFTER decryption, by the discriminator below,
- * and must never render a recognized receipt as message text. Burn-on-read
+ * and must never render a recognized receipt as message text. The serialized
+ * payload is padded like any message plaintext before encryption (256-byte
+ * blocks — packages/crypto padding.ts and Android's MessagePadding), so
+ * ciphertext length cannot fingerprint a receipt either. Burn-on-read
  * messages never produce a receipt — their propagated burn signal is the
  * read confirmation.
  *

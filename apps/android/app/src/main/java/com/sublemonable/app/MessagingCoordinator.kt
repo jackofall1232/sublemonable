@@ -7,6 +7,7 @@ package com.sublemonable.app
 
 import android.content.Context
 import android.util.Log
+import com.sublemonable.app.crypto.MessagePadding
 import com.sublemonable.app.crypto.SignalProtocolManager
 import com.sublemonable.app.diagnostics.BootDiagnostics
 import com.sublemonable.app.data.ControlPayload
@@ -345,7 +346,11 @@ class MessagingCoordinator(
                         )
                     }
                     stage = "encrypt"
-                    signal.encrypt(conversation.contactId, text.toByteArray(Charsets.UTF_8))
+                    // Length-hiding padding before encryption — see MessagePadding.
+                    signal.encrypt(
+                        conversation.contactId,
+                        MessagePadding.pad(text.toByteArray(Charsets.UTF_8)),
+                    )
                 } ?: return@launch
                 val envelope = MessageEnvelope(
                     id = UUID.randomUUID().toString(),
@@ -439,7 +444,9 @@ class MessagingCoordinator(
                 val plaintext = ControlPayload.readReceipt(messageIds)
                 val encrypted = withSessionLock(contactId) {
                     if (!signal.hasSession(contactId)) return@withSessionLock null
-                    signal.encrypt(contactId, plaintext.toByteArray(Charsets.UTF_8))
+                    // Padded like every text message, so ciphertext length
+                    // can't fingerprint the receipt either.
+                    signal.encrypt(contactId, MessagePadding.pad(plaintext.toByteArray(Charsets.UTF_8)))
                 } ?: return@launch
                 val envelope = MessageEnvelope(
                     id = UUID.randomUUID().toString(),
@@ -518,7 +525,10 @@ class MessagingCoordinator(
                         isPreKeyMessage = envelope.ephemeralKey != null,
                     )
                 }
-                val text = String(plaintext, Charsets.UTF_8)
+                // Strip length-hiding padding; a legacy (pre-padding) sender's
+                // bytes pass through unchanged — see MessagePadding.
+                val body = MessagePadding.unpadOrNull(plaintext) ?: plaintext
+                val text = String(body, Charsets.UTF_8)
                 // Read receipts ride inside ordinary envelopes (see
                 // ControlPayload) — recognize them BEFORE treating the payload
                 // as displayable conversation text. A receipt updates our
