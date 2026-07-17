@@ -145,6 +145,27 @@ fun MessageBubble(
                                     modifier = Modifier.size(13.dp),
                                 )
                             }
+                            // Outgoing status: "…" sending, "✓" handed to the
+                            // relay (the protocol has no per-device delivered
+                            // event), "✓✓" only when the peer's encrypted read
+                            // receipt arrives — so the double mark is a real
+                            // read confirmation, never an approximation.
+                            if (isMine) {
+                                Text(
+                                    text = when (message.state) {
+                                        MessageState.SENDING -> "…"
+                                        MessageState.READ -> "✓✓"
+                                        else -> "✓"
+                                    },
+                                    fontFamily = MonoFamily,
+                                    fontSize = TypeScale.Xs,
+                                    color = if (message.state == MessageState.READ) {
+                                        TextOnLemon
+                                    } else {
+                                        TextOnLemon.copy(alpha = 0.45f)
+                                    },
+                                )
+                            }
                         }
                     }
                 }

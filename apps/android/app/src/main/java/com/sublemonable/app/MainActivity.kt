@@ -283,7 +283,12 @@ private fun SublemonableRoot(
                         onSend = { text, ttl, burn ->
                             container.coordinator.sendText(conversation, text, ttl, burn)
                         },
-                        onMessageSeen = container.messageRepository::markRead,
+                        // Through the coordinator (not the repository directly):
+                        // seen messages arm burn-on-read timers AND, when
+                        // enabled, send the encrypted read receipt.
+                        onMessagesSeen = { seenIds ->
+                            container.coordinator.onMessagesSeen(conversation, seenIds)
+                        },
                         onTyping = { started ->
                             container.coordinator.sendTyping(conversation, started)
                         },

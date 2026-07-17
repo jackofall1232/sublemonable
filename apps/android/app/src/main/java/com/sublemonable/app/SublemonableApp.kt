@@ -85,6 +85,7 @@ class AppContainer(private val app: Application) {
         ws = wsClient,
         messages = messageRepository,
         conversations = conversationRepository,
+        settings = settingsRepository,
         diagnostics = bootDiagnostics,
     )
 

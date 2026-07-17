@@ -11,3 +11,4 @@ export * from "./transport.js";
 export * from "./deaddrop.js";
 export * from "./relay.js";
 export * from "./privacy.js";
+export * from "./receipts.js";

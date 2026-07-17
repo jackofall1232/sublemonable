@@ -28,7 +28,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -79,24 +78,34 @@ fun ChatScreen(
     onVerifyKeys: () -> Unit,
     onBurnAll: () -> Unit,
     onSend: (text: String, ttlSeconds: Int?, burnOnRead: Boolean) -> Unit,
-    onMessageSeen: (messageId: String) -> Unit,
+    onMessagesSeen: (messageIds: List<String>) -> Unit,
     modifier: Modifier = Modifier,
     onTyping: (Boolean) -> Unit = {},
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
-    var burnOnRead by rememberSaveable { mutableStateOf(defaultBurnOnRead) }
-    var ttlIndex by rememberSaveable {
-        mutableIntStateOf(ttlOptions.indexOf(defaultTtlSeconds).coerceAtLeast(0))
-    }
+    // Per-message overrides for the compose-bar burn controls. null = no
+    // explicit choice, so the CURRENT settings default applies — live: a new
+    // chat starts on the real default, and flipping the setting updates the
+    // effective value even while this chat is composed. Deliberately plain
+    // remember, NOT rememberSaveable: the old code seeded saveable state from
+    // the default once, and a restored stale snapshot (process death, config
+    // change) then shadowed the setting for good — the Settings toggles
+    // looked completely dead.
+    var burnOnReadOverride by remember { mutableStateOf<Boolean?>(null) }
+    var ttlOverrideIndex by remember { mutableStateOf<Int?>(null) }
+    val burnOnRead = burnOnReadOverride ?: defaultBurnOnRead
+    val ttlIndex = ttlOverrideIndex ?: ttlOptions.indexOf(defaultTtlSeconds).coerceAtLeast(0)
     val ttlSeconds = ttlOptions.getOrNull(ttlIndex)
 
     // Opening the chat (or a new message arriving while it is open) marks
-    // incoming messages as seen — which is the burn trigger for
-    // burn-on-read messages.
+    // incoming messages as seen — the trigger for burn-on-read grace timers
+    // and (when enabled) read receipts. Batched: one callback per change-set,
+    // so a backlog of unread messages costs one receipt envelope, not N.
     LaunchedEffect(messages) {
-        messages
+        val seen = messages
             .filter { !it.isMine && (it.state == MessageState.DELIVERED || it.state == MessageState.SENT) }
-            .forEach { onMessageSeen(it.id) }
+            .map { it.id }
+        if (seen.isNotEmpty()) onMessagesSeen(seen)
     }
 
     // Typing indicator out — sent as encrypted signals, not plaintext.
@@ -221,9 +230,9 @@ fun ChatScreen(
                 }
             },
             burnOnRead = burnOnRead,
-            onToggleBurnOnRead = { burnOnRead = !burnOnRead },
+            onToggleBurnOnRead = { burnOnReadOverride = !burnOnRead },
             ttlSeconds = ttlSeconds,
-            onCycleTtl = { ttlIndex = (ttlIndex + 1) % ttlOptions.size },
+            onCycleTtl = { ttlOverrideIndex = (ttlIndex + 1) % ttlOptions.size },
         )
     }
 }

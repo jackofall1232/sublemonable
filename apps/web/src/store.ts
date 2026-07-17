@@ -36,6 +36,7 @@ import {
   DROP_POW_DIFFICULTY,
   ONE_TIME_PREKEY_BATCH,
   parseEnvelope,
+  parseReadReceipt,
   PROTOCOL_VERSION,
   type MessageEnvelope,
   type ServerEvent,
@@ -343,11 +344,22 @@ export const useApp = create<AppState>((set, get) => {
               contact.pendingEphemeralKey = null;
               contact.pendingPrekeyId = null;
               set((s) => ({ contacts: { ...s.contacts, [envelope.sender_id]: { ...contact } } }));
+              const text = utf8Decode(unpad(plaintext));
+              // Read receipts ride inside ordinary envelopes so the relay
+              // can't tell them from messages — recognize and swallow them
+              // here instead of rendering the control JSON as text. (The web
+              // client doesn't yet track per-message read state; the receipt
+              // is still acked so the server deletes its copy.)
+              if (parseReadReceipt(text) !== null) {
+                ws?.send({ type: "message.ack", message_id: envelope.id });
+                await persist();
+                break;
+              }
               appendMessage(envelope.sender_id, {
                 id: envelope.id,
                 peerId: envelope.sender_id,
                 direction: "received",
-                text: utf8Decode(unpad(plaintext)),
+                text,
                 timestamp: envelope.timestamp,
                 ttlSeconds: envelope.ttl_seconds,
                 burnOnRead: envelope.burn_on_read,

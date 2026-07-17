@@ -7,14 +7,17 @@ package com.sublemonable.app
 
 import android.content.Context
 import android.util.Log
+import com.sublemonable.app.crypto.MessagePadding
 import com.sublemonable.app.crypto.SignalProtocolManager
 import com.sublemonable.app.diagnostics.BootDiagnostics
+import com.sublemonable.app.data.ControlPayload
 import com.sublemonable.app.data.Conversation
 import com.sublemonable.app.data.ConversationRepository
 import com.sublemonable.app.data.Message
 import com.sublemonable.app.data.MessageEnvelope
 import com.sublemonable.app.data.MessageRepository
 import com.sublemonable.app.data.MessageState
+import com.sublemonable.app.data.SettingsRepository
 import com.sublemonable.app.net.ApiClient
 import com.sublemonable.app.net.WsClient
 import com.sublemonable.app.notifications.MessagingNotifications
@@ -30,9 +33,12 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
 import kotlin.math.min
 
@@ -72,6 +78,7 @@ class MessagingCoordinator(
     private val ws: WsClient,
     private val messages: MessageRepository,
     private val conversations: ConversationRepository,
+    private val settings: SettingsRepository,
     private val diagnostics: BootDiagnostics,
 ) : WsClient.Listener {
 
@@ -115,6 +122,30 @@ class MessagingCoordinator(
     @Volatile
     private var linkJob: Job? = null
 
+    /**
+     * One mutex per contact serializes every Double Ratchet operation on
+     * that session — text sends, receipt sends, and inbound decrypts all run
+     * on pooled dispatcher threads, and two operations advancing the same
+     * session concurrently would each persist from the same snapshot: a
+     * forked ratchet, duplicate counters, and a peer that can no longer
+     * decrypt. Entries are never evicted; a Mutex is tiny and the contact
+     * set is small.
+     */
+    private val sessionLocks = ConcurrentHashMap<String, Mutex>()
+
+    private suspend fun <T> withSessionLock(contactId: String, block: suspend () -> T): T =
+        sessionLocks.getOrPut(contactId) { Mutex() }.withLock { block() }
+
+    /**
+     * Read receipts awaiting a live socket, keyed by contact. Queued when the
+     * hand-off fails (socket down) and flushed on the next CONNECTED
+     * transition: the underlying messages are already READ locally, so they
+     * will never re-enter [onMessagesSeen] — without this queue the sender
+     * would stay at "delivered" forever. In-memory only, like the messages
+     * themselves.
+     */
+    private val pendingReceipts = ConcurrentHashMap<String, MutableList<String>>()
+
     init {
         ws.listener = this
         // Local burns (burn-on-read / burn-all) propagate to the other side.
@@ -124,6 +155,13 @@ class MessagingCoordinator(
         messages.onMessageBurned = { message ->
             conversations.find(message.conversationId)?.let { conversation ->
                 ws.burnMessage(message.id, conversation.contactId)
+            }
+        }
+        // Re-send read receipts that missed a dead socket whenever the
+        // connection comes (back) up.
+        scope.launch {
+            ws.connectionState.collect { state ->
+                if (state == WsClient.ConnectionState.CONNECTED) flushPendingReceipts()
             }
         }
     }
@@ -282,30 +320,38 @@ class MessagingCoordinator(
             // Stage names only — never data.
             var stage = "check-session"
             runCatching {
-                if (!signal.hasSession(conversation.contactId)) {
-                    stage = "fetch-prekey-bundle"
-                    diag("send: no session — firing GET prekey bundle")
-                    val bundle = api.fetchPreKeyBundle(conversation.contactId)
-                    val pinned = conversation.pinnedIdentityKeyBase64
-                    if (pinned != null && pinned != bundle.identityKeyBase64) {
-                        // The relay returned a different identity key than the
-                        // one exchanged out of band (contact QR). That is a
-                        // key-substitution attempt — refuse to establish the
-                        // session or send, and raise the warning badge instead
-                        // of silently trusting the relay's key.
-                        diag("send: identity key mismatch — send refused, warning raised")
-                        conversations.flagIdentityMismatch(conversation.contactId)
-                        return@launch
+                // Session establishment + encrypt hold the per-contact lock so
+                // a concurrent receipt send can't fork the ratchet.
+                val encrypted = withSessionLock(conversation.contactId) {
+                    if (!signal.hasSession(conversation.contactId)) {
+                        stage = "fetch-prekey-bundle"
+                        diag("send: no session — firing GET prekey bundle")
+                        val bundle = api.fetchPreKeyBundle(conversation.contactId)
+                        val pinned = conversation.pinnedIdentityKeyBase64
+                        if (pinned != null && pinned != bundle.identityKeyBase64) {
+                            // The relay returned a different identity key than the
+                            // one exchanged out of band (contact QR). That is a
+                            // key-substitution attempt — refuse to establish the
+                            // session or send, and raise the warning badge instead
+                            // of silently trusting the relay's key.
+                            diag("send: identity key mismatch — send refused, warning raised")
+                            conversations.flagIdentityMismatch(conversation.contactId)
+                            return@withSessionLock null
+                        }
+                        stage = "establish-session"
+                        signal.establishSession(conversation.contactId, bundle)
+                        diag("send: X3DH session established")
+                        conversations.upsert(
+                            conversation.copy(contactIdentityKeyBase64 = bundle.identityKeyBase64),
+                        )
                     }
-                    stage = "establish-session"
-                    signal.establishSession(conversation.contactId, bundle)
-                    diag("send: X3DH session established")
-                    conversations.upsert(
-                        conversation.copy(contactIdentityKeyBase64 = bundle.identityKeyBase64),
+                    stage = "encrypt"
+                    // Length-hiding padding before encryption — see MessagePadding.
+                    signal.encrypt(
+                        conversation.contactId,
+                        MessagePadding.pad(text.toByteArray(Charsets.UTF_8)),
                     )
-                }
-                stage = "encrypt"
-                val encrypted = signal.encrypt(conversation.contactId, text.toByteArray(Charsets.UTF_8))
+                } ?: return@launch
                 val envelope = MessageEnvelope(
                     id = UUID.randomUUID().toString(),
                     senderId = accountId,
@@ -365,6 +411,93 @@ class MessagingCoordinator(
         if (started) ws.typingStart(conversation.contactId) else ws.typingStop(conversation.contactId)
     }
 
+    /**
+     * The chat screen reports the batch of incoming messages that just became
+     * visible. Read state is applied locally (which also arms the burn-on-read
+     * grace timers); when "Send read receipts" is enabled, ONE encrypted
+     * receipt envelope acknowledges the whole batch — a chat opened onto N
+     * unread messages costs a single send against the relay's rate limit, not
+     * N. Burn-on-read messages never produce a receipt: their delayed burn
+     * signal IS the read confirmation ([MessageRepository.markRead] returns
+     * false for them).
+     */
+    fun onMessagesSeen(conversation: Conversation, messageIds: List<String>) {
+        val newlyRead = messageIds.filter { messages.markRead(it) }
+        if (newlyRead.isEmpty()) return
+        if (!settings.settings.value.readReceipts) return
+        sendReadReceipt(conversation.contactId, newlyRead)
+    }
+
+    /**
+     * Encrypt-and-send a read receipt disguised as an ordinary message
+     * envelope — the relay cannot distinguish it from conversation text (see
+     * [ControlPayload] for the server-blind rationale). Receipts only ride an
+     * existing session: we just decrypted a message from this peer, so one
+     * exists; if it somehow doesn't, the receipt is skipped rather than
+     * establishing X3DH for a control signal. A receipt that can't be handed
+     * off is queued in [pendingReceipts] and re-sent on reconnect.
+     */
+    private fun sendReadReceipt(contactId: String, messageIds: List<String>) {
+        scope.launch {
+            val accountId = api.accountId ?: return@launch
+            runCatching {
+                val plaintext = ControlPayload.readReceipt(messageIds)
+                val encrypted = withSessionLock(contactId) {
+                    if (!signal.hasSession(contactId)) return@withSessionLock null
+                    // Padded like every text message, so ciphertext length
+                    // can't fingerprint the receipt either.
+                    signal.encrypt(contactId, MessagePadding.pad(plaintext.toByteArray(Charsets.UTF_8)))
+                } ?: return@launch
+                val envelope = MessageEnvelope(
+                    id = UUID.randomUUID().toString(),
+                    senderId = accountId,
+                    recipientId = contactId,
+                    ciphertext = encrypted.ciphertextBase64,
+                    ephemeralKey = encrypted.ephemeralKeyBase64,
+                    preKeyId = encrypted.preKeyId,
+                    messageNumber = encrypted.messageNumber,
+                    previousChainLength = 0,
+                    timestamp = DateTimeFormatter.ISO_INSTANT.format(Instant.now()),
+                    // Server-blindness: a receipt envelope must look exactly
+                    // like a text message — no TTL, no burn flag, text media.
+                    ttlSeconds = null,
+                    burnOnRead = false,
+                    mediaType = MessageEnvelope.MEDIA_TEXT,
+                )
+                if (!ws.sendMessage(envelope)) {
+                    // Socket down. The messages are already READ locally, so
+                    // they will never re-enter onMessagesSeen — queue the ids
+                    // for the reconnect flush. Connection state only — never
+                    // the envelope.
+                    diag("receipt: hand-off failed — queued (${ws.connectionState.value})")
+                    queueReceipts(contactId, messageIds)
+                }
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
+                queueReceipts(contactId, messageIds)
+                diag("receipt: failed — queued: ${e.javaClass.name}: ${e.message}")
+            }
+        }
+    }
+
+    private fun queueReceipts(contactId: String, messageIds: List<String>) {
+        pendingReceipts.compute(contactId) { _, existing ->
+            val list = existing ?: mutableListOf()
+            messageIds.forEach { if (it !in list) list.add(it) }
+            list
+        }
+    }
+
+    private fun flushPendingReceipts() {
+        // Iterate over a snapshot of the keys; remove() hands each queued
+        // batch to exactly one flush even if two CONNECTED events race.
+        pendingReceipts.keys.toList().forEach { contactId ->
+            pendingReceipts.remove(contactId)?.let { ids ->
+                if (ids.isNotEmpty()) sendReadReceipt(contactId, ids)
+            }
+        }
+    }
+
     /** Wipes the server account AND the local keys/messages. Irreversible. */
     fun deleteAccountAndWipe(onComplete: () -> Unit) {
         scope.launch {
@@ -383,17 +516,35 @@ class MessagingCoordinator(
     override fun onMessageDeliver(envelope: MessageEnvelope) {
         scope.launch {
             runCatching {
-                val plaintext = signal.decrypt(
-                    remoteAccountId = envelope.senderId,
-                    ciphertextBase64 = envelope.ciphertext,
-                    isPreKeyMessage = envelope.ephemeralKey != null,
-                )
+                // Decrypt advances the receiving ratchet — serialize it with
+                // any concurrent encrypt for the same contact.
+                val plaintext = withSessionLock(envelope.senderId) {
+                    signal.decrypt(
+                        remoteAccountId = envelope.senderId,
+                        ciphertextBase64 = envelope.ciphertext,
+                        isPreKeyMessage = envelope.ephemeralKey != null,
+                    )
+                }
+                // Strip length-hiding padding; a legacy (pre-padding) sender's
+                // bytes pass through unchanged — see MessagePadding.
+                val body = MessagePadding.unpadOrNull(plaintext) ?: plaintext
+                val text = String(body, Charsets.UTF_8)
+                // Read receipts ride inside ordinary envelopes (see
+                // ControlPayload) — recognize them BEFORE treating the payload
+                // as displayable conversation text. A receipt updates our
+                // outgoing copies, gets acked (so the server deletes its copy),
+                // and never bumps the conversation or fires a notification.
+                ControlPayload.parseReadReceipt(text)?.let { readIds ->
+                    readIds.forEach(messages::onPeerRead)
+                    ws.ackMessage(envelope.id)
+                    return@runCatching
+                }
                 val conversation = conversations.onIncomingMessage(envelope.senderId)
                 messages.addIncoming(
                     Message(
                         id = envelope.id,
                         conversationId = conversation.id,
-                        text = String(plaintext, Charsets.UTF_8),
+                        text = text,
                         isMine = false,
                         timestampMs = runCatching {
                             Instant.parse(envelope.timestamp).toEpochMilli()
