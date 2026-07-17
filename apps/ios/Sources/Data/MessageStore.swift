@@ -77,6 +77,12 @@ public final class MessageStore: ObservableObject {
     /// when backgrounded.
     public var onInboundMessage: (() -> Void)?
 
+    /// Privacy-safe send-path diagnostics sink (BootDiagnostics.record) —
+    /// fixed stage markers + error type/code only, never content or ids.
+    /// Without it, a failed send is invisible: the bubble just disappears
+    /// (exactly how Android's unsent messages hid until PR #23's Part 1).
+    public var diag: (String) -> Void = { _ in }
+
     public init(signal: SignalManager,
                 socket: WebSocketClient,
                 conversations: ConversationStore) {
@@ -110,13 +116,22 @@ public final class MessageStore: ObservableObject {
         append(message)
 
         do {
+            if !signal.hasSession(with: contact.id) {
+                diag("send: no session — firing GET prekey bundle")
+            }
+            // Length-hiding padding before encryption (256-byte blocks) —
+            // the cross-platform plaintext convention since PR #24; see
+            // MessagePadding / packages/crypto/src/padding.ts.
             let envelope = try await signal.encrypt(
-                plaintext: Data(text.utf8),
+                plaintext: MessagePadding.pad(Data(text.utf8)),
                 for: contact,
                 messageID: message.id,
                 ttlSeconds: ttlSeconds,
                 burnOnRead: burnOnRead
             )
+            if socket.state != .connected {
+                diag("send: hand-off while socket \(socket.state) — frame will be dropped")
+            }
             try socket.send(.messageSend(envelope))
             message.state = .sent
             // Sender-side TTL mirrors the recipient's (enforced_both_sides).
@@ -125,6 +140,7 @@ public final class MessageStore: ObservableObject {
             scheduleTTLDestruction(for: message)
         } catch {
             // Encryption/transport failure — never log content, only state.
+            diag("send: failed: \(BootDiagnostics.describe(error))")
             remove(messageID: message.id, conversationID: contact.id)
         }
         conversations.noteActivity(contactID: contact.id, incrementUnread: false)
@@ -136,10 +152,25 @@ public final class MessageStore: ObservableObject {
         guard let senderID = UUID(uuidString: envelope.senderID) else { return }
         do {
             let plaintext = try signal.decrypt(envelope: envelope)
+            // Strip length-hiding padding; a legacy (pre-padding) sender's
+            // bytes pass through unchanged — see MessagePadding.
+            let body = MessagePadding.unpadOrNil(plaintext) ?? plaintext
+            let text = String(decoding: body, as: UTF8.self)
+            // Read receipts ride inside ordinary envelopes as encrypted
+            // control payloads (packages/protocol/src/receipts.ts, PR #24) —
+            // recognize them BEFORE treating the payload as conversation
+            // text, or an Android/web peer's receipt renders as a JSON blob.
+            // iOS doesn't SEND receipts or surface read state yet (tracked in
+            // todos.md); swallowing + acking keeps the store-and-forward
+            // contract without rendering garbage.
+            if Self.isControlPayload(text) {
+                try? socket.send(.messageAck(messageID: envelope.id))
+                return
+            }
             let message = Message(
                 id: UUID(uuidString: envelope.id) ?? UUID(),
                 conversationID: senderID,
-                text: String(decoding: plaintext, as: UTF8.self),
+                text: text,
                 isOutgoing: false,
                 sentAt: envelope.timestampDate ?? Date(),
                 ttlSeconds: envelope.ttlSeconds,
@@ -171,8 +202,11 @@ public final class MessageStore: ObservableObject {
         update(message)
         if message.burnOnRead {
             // Tell the network the message burned, so the sender's copy and
-            // any server residue are destroyed as well.
-            try? socket.send(.messageBurn(messageID: messageID.uuidString.lowercased()))
+            // any server residue are destroyed as well. The conversation ID
+            // is the peer's account UUID — the server requires peer_id to
+            // route the burn notification (rejects it with bad_peer otherwise).
+            try? socket.send(.messageBurn(messageID: messageID.uuidString.lowercased(),
+                                          peerID: conversationID.uuidString.lowercased()))
         }
     }
 
@@ -194,7 +228,8 @@ public final class MessageStore: ObservableObject {
     /// through the dissolve and is destroyed, and the peer is notified.
     public func burnAll(conversationID: UUID) {
         for message in messages(for: conversationID) {
-            try? socket.send(.messageBurn(messageID: message.id.uuidString.lowercased()))
+            try? socket.send(.messageBurn(messageID: message.id.uuidString.lowercased(),
+                                          peerID: conversationID.uuidString.lowercased()))
             beginBurn(messageID: message.id, conversationID: conversationID)
         }
     }
@@ -256,5 +291,20 @@ public final class MessageStore: ObservableObject {
         ttlTasks.values.forEach { $0.cancel() }
         ttlTasks.removeAll()
         messagesByConversation.removeAll()
+    }
+
+    // MARK: - Control payloads (packages/protocol/src/receipts.ts)
+
+    /// True when decrypted plaintext is a read-receipt control payload —
+    /// the same strict discriminator as the canonical parseReadReceipt
+    /// (`v` AND `control` AND a message_ids array must all match; anything
+    /// else is conversation text). Never throws on malformed input.
+    nonisolated internal static func isControlPayload(_ plaintext: String) -> Bool {
+        guard plaintext.hasPrefix("{"),
+              let object = try? JSONSerialization.jsonObject(with: Data(plaintext.utf8)),
+              let dict = object as? [String: Any] else { return false }
+        return (dict["v"] as? Int) == 1
+            && (dict["control"] as? String) == "receipt.read"
+            && dict["message_ids"] is [Any]
     }
 }
