@@ -23,7 +23,12 @@ import Foundation
 public actor APIClient {
     public enum APIError: Error {
         case invalidResponse
-        case http(Int)
+        /// `serverCode` is the fixed-vocabulary schema code from the server's
+        /// `{"error":"<code>"}` body (e.g. `bad_identity_key`) — never request
+        /// or response content, so it is safe for on-device diagnostics. A
+        /// contract-mismatch 400 is self-diagnosing from the code alone
+        /// (Android learned this the hard way — ledger Run 12).
+        case http(Int, serverCode: String?)
         case notAuthenticated
         case registrationFailed
     }
@@ -258,10 +263,20 @@ public actor APIClient {
                 try await refreshSession()
                 continue
             default:
-                // Status code only — bodies are never logged or surfaced.
-                throw APIError.http(http.statusCode)
+                // Surface only the fixed-vocabulary error code the server's
+                // errJSON helper emits — never the raw body.
+                throw APIError.http(http.statusCode,
+                                    serverCode: Self.serverErrorCode(from: data))
             }
         }
+    }
+
+    /// Extracts the server's `{"error":"<code>"}` schema code, defensively
+    /// length-capped; nil for anything that isn't that exact shape.
+    private static func serverErrorCode(from data: Data) -> String? {
+        struct ErrorBody: Decodable { let error: String }
+        guard let body = try? JSONDecoder().decode(ErrorBody.self, from: data) else { return nil }
+        return String(body.error.prefix(64))
     }
 
     private func request<B: Encodable, R: Decodable>(_ method: Method,
