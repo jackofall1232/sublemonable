@@ -20,7 +20,8 @@ export const ANDROID_BETA_VERSION = "v1.5.4";
 export const ANDROID_BETA_APK_URL = `${GITHUB_URL}/releases/download/${ANDROID_BETA_VERSION}/sublemonable-${ANDROID_BETA_VERSION}.apk`;
 // 64 hex chars. Must be byte-identical to onion-site/SHA256SUMS — both surfaces
 // must serve the same binary. Verify: sha256sum onion-site/sublemonable-v1.5.4.apk
-export const ANDROID_BETA_SHA256 = "5ccb46226a669119a3740abdc658118b6df02239c2e645946265d47d38f591db";
+export const ANDROID_BETA_SHA256 =
+  "5ccb46226a669119a3740abdc658118b6df02239c2e645946265d47d38f591db";
 export const ANDROID_BETA_MIN_OS = "Android 8.0 (Oreo)";
 
 // ── Tor download mirror ───────────────────────────────────────────────────────

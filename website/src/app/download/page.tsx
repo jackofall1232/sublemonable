@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Metadata } from "next";
+import Link from "next/link";
 import { LemonSlice } from "@/components/LemonSlice";
 import { GITHUB_URL, SELF_HOSTING_DOC } from "@/lib/links";
 
@@ -54,6 +55,23 @@ export default function DownloadPage() {
             <StoreBadge line1="Coming soon to the" store="App Store" />
             <StoreBadge line1="Coming soon to" store="Google Play" />
           </div>
+          {/* Deliberately version-agnostic: the beta page owns version and
+              checksum details (they come from lib/links.ts there). */}
+          <Link
+            href="/download/beta"
+            className="mt-6 block rounded-md border border-lemon/40 bg-bg-elevated px-5 py-4 transition duration-base ease-brand hover:border-lemon"
+          >
+            <div className="font-mono text-[10px] uppercase tracking-wide text-lemon">
+              Available now
+            </div>
+            <div className="mt-1 font-display text-base font-semibold text-ink-primary">
+              Android beta — sideload while we finish Play Store review
+            </div>
+            <div className="mt-1 text-sm leading-relaxed text-ink-secondary">
+              A signed APK with SHA-256 checksum and verification steps. It&apos;s a pre-release —
+              expect rough edges.
+            </div>
+          </Link>
         </section>
 
         {/* PWA */}
@@ -122,9 +140,9 @@ export default function DownloadPage() {
           </div>
           <p className="mt-5 leading-relaxed text-ink-secondary">
             Screenshot protection on the desktop app is a focus-loss blur overlay — the same
-            mechanism as the browser. It&apos;s best-effort: Linux has no universal way to hard-block
-            screen capture on Wayland or X11. For an OS-level hard block on message content, the
-            Android app is the platform that provides it.
+            mechanism as the browser. It&apos;s best-effort: Linux has no universal way to
+            hard-block screen capture on Wayland or X11. For an OS-level hard block on message
+            content, the Android app is the platform that provides it.
           </p>
         </section>
 
