@@ -21,6 +21,10 @@ public final class NotificationManager: NSObject, UNUserNotificationCenterDelega
     public static let fixedTitle = "Sublemonable"
     public static let fixedBody = "New message"
 
+    // Sound resolution lives in NotificationSoundStore: the branded default
+    // (bundled new_message.wav) unless the user has imported their own, in
+    // which case a transcoded CAF in Library/Sounds is used instead.
+
     public func configure() {
         UNUserNotificationCenter.current().delegate = self
     }
@@ -36,7 +40,7 @@ public final class NotificationManager: NSObject, UNUserNotificationCenterDelega
         let content = UNMutableNotificationContent()
         content.title = Self.fixedTitle
         content.body = Self.fixedBody
-        content.sound = .default
+        content.sound = NotificationSoundStore.currentSound()
         // Deliberately NOT set: subtitle, userInfo content, thread/sender
         // identifiers — nothing that could leak who or what.
         let request = UNNotificationRequest(

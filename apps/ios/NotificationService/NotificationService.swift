@@ -17,6 +17,14 @@ import UserNotifications
 final class NotificationService: UNNotificationServiceExtension {
     private static let fixedTitle = "Sublemonable"
     private static let fixedBody = "New message"
+    // The extension resolves sounds against ITS OWN bundle, so it uses the
+    // bundled brand default (new_message.wav ships in this target too). A
+    // user's imported custom sound lives in the app container and is NOT
+    // reachable from here — to honor it on push, put the custom file in a
+    // shared App Group container and read NotificationSoundStore.preferenceKey
+    // from UserDefaults(suiteName:). Push isn't wired yet, so this is the
+    // documented upgrade path, not a current gap.
+    private static let soundName = UNNotificationSoundName("new_message.wav")
 
     private var contentHandler: ((UNNotificationContent) -> Void)?
     private var sanitizedContent: UNMutableNotificationContent?
@@ -30,7 +38,7 @@ final class NotificationService: UNNotificationServiceExtension {
         let content = UNMutableNotificationContent()
         content.title = Self.fixedTitle
         content.body = Self.fixedBody
-        content.sound = .default
+        content.sound = UNNotificationSound(named: Self.soundName)
         // Explicitly NOT carried over: subtitle, userInfo, attachments,
         // threadIdentifier, summaryArgument, badge — any of these could leak
         // sender identity or content.
