@@ -11,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
@@ -29,6 +30,12 @@ import java.util.concurrent.ConcurrentHashMap
  *    side via WebSocket. The burn arriving at the sender doubles as the read
  *    confirmation for these messages, so the delay is deliberate design, not
  *    slack: burn time ≈ read time + the grace window.
+ *
+ * Hit concurrently from the main thread (read marks out of the chat screen)
+ * and coroutine dispatchers (WS delivery, peer receipts, TTL and read-burn
+ * timers) — every state mutation is a single atomic CAS, and guarded
+ * transitions carry their guard INTO the CAS (see [update]) so racing
+ * writers can neither lose updates nor double-fire a transition.
  */
 class MessageRepository(
     private val scope: CoroutineScope,
@@ -82,23 +89,30 @@ class MessageRepository(
      *   (whose burn signal IS the read confirmation) all return false.
      */
     fun markRead(messageId: String): Boolean {
+        // isMine/burnOnRead are immutable per message — safe to route on a
+        // snapshot read; the state transition itself is guarded in the CAS.
         val message = find(messageId) ?: return false
         if (message.isMine) return false
-        if (message.state == MessageState.BURNING || message.state == MessageState.READ) return false
         if (message.burnOnRead) {
             scheduleReadBurn(messageId)
             return false
         }
-        update(messageId) { it.copy(state = MessageState.READ) }
-        return true
+        return update(
+            messageId,
+            precondition = { it.state != MessageState.BURNING && it.state != MessageState.READ },
+            transform = { it.copy(state = MessageState.READ) },
+        ) != null
     }
 
     /** The peer's read receipt arrived — flip our outgoing copy to READ. */
     fun onPeerRead(messageId: String) {
-        val message = find(messageId) ?: return
-        if (!message.isMine) return
-        if (message.state == MessageState.BURNING || message.state == MessageState.READ) return
-        update(messageId) { it.copy(state = MessageState.READ) }
+        update(
+            messageId,
+            precondition = {
+                it.isMine && it.state != MessageState.BURNING && it.state != MessageState.READ
+            },
+            transform = { it.copy(state = MessageState.READ) },
+        )
     }
 
     /**
@@ -110,9 +124,13 @@ class MessageRepository(
         // A pending read-burn racing this burn (burn-all, remote burn, TTL)
         // must not fire a second burn after its grace window.
         readBurnJobs.remove(messageId)?.cancel()
-        val current = find(messageId) ?: return
-        if (current.state == MessageState.BURNING) return
-        val burning = update(messageId) { it.copy(state = MessageState.BURNING) } ?: return
+        // Guard inside the CAS: racing burns (remote + local) win the flip
+        // to BURNING exactly once, so the peer is never notified twice.
+        val burning = update(
+            messageId,
+            precondition = { it.state != MessageState.BURNING },
+            transform = { it.copy(state = MessageState.BURNING) },
+        ) ?: return
         if (notifyPeer) onMessageBurned?.invoke(burning)
         scope.launch {
             // Let the particle dissolve finish before the message ceases to
@@ -152,7 +170,11 @@ class MessageRepository(
      */
     private fun scheduleReadBurn(messageId: String) {
         if (readBurnJobs.containsKey(messageId)) return
-        update(messageId) { it.copy(state = MessageState.READ) }
+        update(
+            messageId,
+            precondition = { it.state != MessageState.BURNING && it.state != MessageState.READ },
+            transform = { it.copy(state = MessageState.READ) },
+        ) ?: return
         readBurnJobs[messageId] = scope.launch {
             delay(BURN_ON_READ_DELAY_MS)
             // Drop our own handle BEFORE burning so burn()'s cancellation of
@@ -180,31 +202,60 @@ class MessageRepository(
         _messages.value.values.asSequence().flatten().firstOrNull { it.id == messageId }
 
     private fun upsert(message: Message) {
-        _messages.value = _messages.value.toMutableMap().apply {
-            val list = get(message.conversationId).orEmpty()
+        _messages.update { current ->
+            val list = current[message.conversationId].orEmpty()
             val existing = list.indexOfFirst { it.id == message.id }
-            put(
-                message.conversationId,
-                if (existing >= 0) {
-                    list.toMutableList().also { it[existing] = message }
-                } else {
-                    list + message
-                },
-            )
+            current.toMutableMap().apply {
+                put(
+                    message.conversationId,
+                    if (existing >= 0) {
+                        list.toMutableList().also { it[existing] = message }
+                    } else {
+                        list + message
+                    },
+                )
+            }
         }
     }
 
-    private fun update(messageId: String, transform: (Message) -> Message): Message? {
-        val current = find(messageId) ?: return null
-        val updated = transform(current)
-        upsert(updated)
-        return updated
+    /**
+     * Atomically finds and transforms one message when [precondition] holds —
+     * a single CAS loop over the state map, so writers on different threads
+     * can neither lose each other's updates nor double-fire a guarded
+     * transition (e.g. two racing burns both notifying the peer). Both
+     * lambdas may re-run on CAS contention and must stay pure. Returns the
+     * transformed message, or null when it is missing or the precondition
+     * rejected it.
+     */
+    private fun update(
+        messageId: String,
+        precondition: (Message) -> Boolean = { true },
+        transform: (Message) -> Message,
+    ): Message? {
+        var applied: Message? = null
+        _messages.update { current ->
+            applied = null
+            val conversationId = current.entries
+                .firstOrNull { (_, list) -> list.any { it.id == messageId } }
+                ?.key
+                ?: return@update current
+            val list = current.getValue(conversationId)
+            val index = list.indexOfFirst { it.id == messageId }
+            val message = list[index]
+            if (!precondition(message)) return@update current
+            val transformed = transform(message)
+            applied = transformed
+            current.toMutableMap().apply {
+                put(conversationId, list.toMutableList().also { it[index] = transformed })
+            }
+        }
+        return applied
     }
 
     private fun remove(messageId: String) {
         ttlJobs.remove(messageId)?.cancel()
-        _messages.value = _messages.value.mapValues { (_, list) ->
-            list.filterNot { it.id == messageId }
+        _messages.update { current ->
+            current.mapValues { (_, list) -> list.filterNot { it.id == messageId } }
         }
     }
 

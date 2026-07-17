@@ -32,9 +32,12 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
 import kotlin.math.min
 
@@ -118,6 +121,30 @@ class MessagingCoordinator(
     @Volatile
     private var linkJob: Job? = null
 
+    /**
+     * One mutex per contact serializes every Double Ratchet operation on
+     * that session — text sends, receipt sends, and inbound decrypts all run
+     * on pooled dispatcher threads, and two operations advancing the same
+     * session concurrently would each persist from the same snapshot: a
+     * forked ratchet, duplicate counters, and a peer that can no longer
+     * decrypt. Entries are never evicted; a Mutex is tiny and the contact
+     * set is small.
+     */
+    private val sessionLocks = ConcurrentHashMap<String, Mutex>()
+
+    private suspend fun <T> withSessionLock(contactId: String, block: suspend () -> T): T =
+        sessionLocks.getOrPut(contactId) { Mutex() }.withLock { block() }
+
+    /**
+     * Read receipts awaiting a live socket, keyed by contact. Queued when the
+     * hand-off fails (socket down) and flushed on the next CONNECTED
+     * transition: the underlying messages are already READ locally, so they
+     * will never re-enter [onMessagesSeen] — without this queue the sender
+     * would stay at "delivered" forever. In-memory only, like the messages
+     * themselves.
+     */
+    private val pendingReceipts = ConcurrentHashMap<String, MutableList<String>>()
+
     init {
         ws.listener = this
         // Local burns (burn-on-read / burn-all) propagate to the other side.
@@ -127,6 +154,13 @@ class MessagingCoordinator(
         messages.onMessageBurned = { message ->
             conversations.find(message.conversationId)?.let { conversation ->
                 ws.burnMessage(message.id, conversation.contactId)
+            }
+        }
+        // Re-send read receipts that missed a dead socket whenever the
+        // connection comes (back) up.
+        scope.launch {
+            ws.connectionState.collect { state ->
+                if (state == WsClient.ConnectionState.CONNECTED) flushPendingReceipts()
             }
         }
     }
@@ -285,30 +319,34 @@ class MessagingCoordinator(
             // Stage names only — never data.
             var stage = "check-session"
             runCatching {
-                if (!signal.hasSession(conversation.contactId)) {
-                    stage = "fetch-prekey-bundle"
-                    diag("send: no session — firing GET prekey bundle")
-                    val bundle = api.fetchPreKeyBundle(conversation.contactId)
-                    val pinned = conversation.pinnedIdentityKeyBase64
-                    if (pinned != null && pinned != bundle.identityKeyBase64) {
-                        // The relay returned a different identity key than the
-                        // one exchanged out of band (contact QR). That is a
-                        // key-substitution attempt — refuse to establish the
-                        // session or send, and raise the warning badge instead
-                        // of silently trusting the relay's key.
-                        diag("send: identity key mismatch — send refused, warning raised")
-                        conversations.flagIdentityMismatch(conversation.contactId)
-                        return@launch
+                // Session establishment + encrypt hold the per-contact lock so
+                // a concurrent receipt send can't fork the ratchet.
+                val encrypted = withSessionLock(conversation.contactId) {
+                    if (!signal.hasSession(conversation.contactId)) {
+                        stage = "fetch-prekey-bundle"
+                        diag("send: no session — firing GET prekey bundle")
+                        val bundle = api.fetchPreKeyBundle(conversation.contactId)
+                        val pinned = conversation.pinnedIdentityKeyBase64
+                        if (pinned != null && pinned != bundle.identityKeyBase64) {
+                            // The relay returned a different identity key than the
+                            // one exchanged out of band (contact QR). That is a
+                            // key-substitution attempt — refuse to establish the
+                            // session or send, and raise the warning badge instead
+                            // of silently trusting the relay's key.
+                            diag("send: identity key mismatch — send refused, warning raised")
+                            conversations.flagIdentityMismatch(conversation.contactId)
+                            return@withSessionLock null
+                        }
+                        stage = "establish-session"
+                        signal.establishSession(conversation.contactId, bundle)
+                        diag("send: X3DH session established")
+                        conversations.upsert(
+                            conversation.copy(contactIdentityKeyBase64 = bundle.identityKeyBase64),
+                        )
                     }
-                    stage = "establish-session"
-                    signal.establishSession(conversation.contactId, bundle)
-                    diag("send: X3DH session established")
-                    conversations.upsert(
-                        conversation.copy(contactIdentityKeyBase64 = bundle.identityKeyBase64),
-                    )
-                }
-                stage = "encrypt"
-                val encrypted = signal.encrypt(conversation.contactId, text.toByteArray(Charsets.UTF_8))
+                    stage = "encrypt"
+                    signal.encrypt(conversation.contactId, text.toByteArray(Charsets.UTF_8))
+                } ?: return@launch
                 val envelope = MessageEnvelope(
                     id = UUID.randomUUID().toString(),
                     senderId = accountId,
@@ -382,7 +420,7 @@ class MessagingCoordinator(
         val newlyRead = messageIds.filter { messages.markRead(it) }
         if (newlyRead.isEmpty()) return
         if (!settings.settings.value.readReceipts) return
-        sendReadReceipt(conversation, newlyRead)
+        sendReadReceipt(conversation.contactId, newlyRead)
     }
 
     /**
@@ -391,20 +429,22 @@ class MessagingCoordinator(
      * [ControlPayload] for the server-blind rationale). Receipts only ride an
      * existing session: we just decrypted a message from this peer, so one
      * exists; if it somehow doesn't, the receipt is skipped rather than
-     * establishing X3DH for a control signal.
+     * establishing X3DH for a control signal. A receipt that can't be handed
+     * off is queued in [pendingReceipts] and re-sent on reconnect.
      */
-    private fun sendReadReceipt(conversation: Conversation, messageIds: List<String>) {
+    private fun sendReadReceipt(contactId: String, messageIds: List<String>) {
         scope.launch {
             val accountId = api.accountId ?: return@launch
             runCatching {
-                if (!signal.hasSession(conversation.contactId)) return@launch
                 val plaintext = ControlPayload.readReceipt(messageIds)
-                val encrypted =
-                    signal.encrypt(conversation.contactId, plaintext.toByteArray(Charsets.UTF_8))
+                val encrypted = withSessionLock(contactId) {
+                    if (!signal.hasSession(contactId)) return@withSessionLock null
+                    signal.encrypt(contactId, plaintext.toByteArray(Charsets.UTF_8))
+                } ?: return@launch
                 val envelope = MessageEnvelope(
                     id = UUID.randomUUID().toString(),
                     senderId = accountId,
-                    recipientId = conversation.contactId,
+                    recipientId = contactId,
                     ciphertext = encrypted.ciphertextBase64,
                     ephemeralKey = encrypted.ephemeralKeyBase64,
                     preKeyId = encrypted.preKeyId,
@@ -418,13 +458,35 @@ class MessagingCoordinator(
                     mediaType = MessageEnvelope.MEDIA_TEXT,
                 )
                 if (!ws.sendMessage(envelope)) {
-                    // Best-effort: a receipt lost to a closed socket is not
-                    // retried. Connection state only — never the envelope.
-                    diag("receipt: hand-off failed — socket not open (${ws.connectionState.value})")
+                    // Socket down. The messages are already READ locally, so
+                    // they will never re-enter onMessagesSeen — queue the ids
+                    // for the reconnect flush. Connection state only — never
+                    // the envelope.
+                    diag("receipt: hand-off failed — queued (${ws.connectionState.value})")
+                    queueReceipts(contactId, messageIds)
                 }
             }.onFailure { e ->
                 if (e is CancellationException) throw e
-                diag("receipt: failed: ${e.javaClass.name}: ${e.message}")
+                queueReceipts(contactId, messageIds)
+                diag("receipt: failed — queued: ${e.javaClass.name}: ${e.message}")
+            }
+        }
+    }
+
+    private fun queueReceipts(contactId: String, messageIds: List<String>) {
+        pendingReceipts.compute(contactId) { _, existing ->
+            val list = existing ?: mutableListOf()
+            messageIds.forEach { if (it !in list) list.add(it) }
+            list
+        }
+    }
+
+    private fun flushPendingReceipts() {
+        // Iterate over a snapshot of the keys; remove() hands each queued
+        // batch to exactly one flush even if two CONNECTED events race.
+        pendingReceipts.keys.toList().forEach { contactId ->
+            pendingReceipts.remove(contactId)?.let { ids ->
+                if (ids.isNotEmpty()) sendReadReceipt(contactId, ids)
             }
         }
     }
@@ -447,11 +509,15 @@ class MessagingCoordinator(
     override fun onMessageDeliver(envelope: MessageEnvelope) {
         scope.launch {
             runCatching {
-                val plaintext = signal.decrypt(
-                    remoteAccountId = envelope.senderId,
-                    ciphertextBase64 = envelope.ciphertext,
-                    isPreKeyMessage = envelope.ephemeralKey != null,
-                )
+                // Decrypt advances the receiving ratchet — serialize it with
+                // any concurrent encrypt for the same contact.
+                val plaintext = withSessionLock(envelope.senderId) {
+                    signal.decrypt(
+                        remoteAccountId = envelope.senderId,
+                        ciphertextBase64 = envelope.ciphertext,
+                        isPreKeyMessage = envelope.ephemeralKey != null,
+                    )
+                }
                 val text = String(plaintext, Charsets.UTF_8)
                 // Read receipts ride inside ordinary envelopes (see
                 // ControlPayload) — recognize them BEFORE treating the payload
