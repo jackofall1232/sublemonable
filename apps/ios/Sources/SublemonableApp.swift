@@ -57,6 +57,7 @@ final class AppEnvironment: ObservableObject {
     let messages: MessageStore
     let capture: CaptureDetector
     let orbot: OrbotIntegration
+    let diagnostics: BootDiagnostics
 
     @AppStorage("org.sublemonable.onboarded") private var onboarded = false
     @AppStorage("org.sublemonable.biometric-lock") private var biometricLock = true
@@ -78,6 +79,7 @@ final class AppEnvironment: ObservableObject {
         self.messages = messages
         self.capture = CaptureDetector()
         self.orbot = OrbotIntegration.shared
+        self.diagnostics = BootDiagnostics()
 
         wire()
     }
@@ -97,6 +99,10 @@ final class AppEnvironment: ObservableObject {
         socket.setAccessTokenProvider { [api] in
             await api.currentAccessToken()
         }
+        // Socket lifecycle + boot + send stages share the one privacy-safe
+        // log (Settings → Connection diagnostics).
+        socket.diag = { [diagnostics] line in diagnostics.record(line) }
+        messages.diag = { [diagnostics] line in diagnostics.record(line) }
         socket.onStateChange = { [weak self] state in
             Task { @MainActor in self?.connectionState = state }
         }
@@ -105,6 +111,12 @@ final class AppEnvironment: ObservableObject {
         }
         socket.onSessionRevoked = { [weak self] in
             Task { @MainActor in self?.phase = .locked }
+        }
+        // Handshake rejected the JWT (they live 15 min): mint a fresh session
+        // and reconnect, instead of the socket reconnect-looping on a dead
+        // token forever — the Android coordinator's onAuthExpired behavior.
+        socket.onAuthExpired = { [weak self] in
+            Task { await self?.reauthenticateAndReconnect() }
         }
         // Content-free notification when a message lands while backgrounded.
         messages.onInboundMessage = {
@@ -161,26 +173,60 @@ final class AppEnvironment: ObservableObject {
     /// First run: generate identity + keys, register. Every run: login with
     /// the signed challenge, connect the socket, rotate the signed prekey if
     /// it is older than 7 days.
+    ///
+    /// Boot stages report to the diagnostics log (Settings → Connection
+    /// diagnostics): fixed stage strings + error type/code only, never keys,
+    /// tokens, ids, or URLs — the same discipline that made Android's
+    /// silent-boot failures diagnosable on-device (PR #19/#20 lineage).
     private func startSession() async {
         phase = .ready
+        var stage = "ensure-identity"
         do {
             if !signal.isRegistered {
                 let registrationKeys = try signal.bootstrapIdentity()
+                stage = "register"
+                diagnostics.record("boot: firing POST /api/v1/register")
                 let accountID = try await api.register(keys: registrationKeys)
                 try signal.setAccountID(accountID)
+                diagnostics.record("boot: registration accepted by server")
             }
             guard let accountID = signal.accountID else { return }
+            stage = "create-session"
             try await api.login(accountID: accountID)
+            stage = "ws-connect"
+            diagnostics.record("boot: session minted, socket handshake handed off")
             socket.connect()
             _ = await NotificationManager.shared.requestAuthorization()
 
+            stage = "rotate-signed-prekey"
             if let rotated = try signal.rotateSignedPreKeyIfNeeded() {
                 try await api.uploadPreKeys([], signedPreKey: rotated)
             }
         } catch {
             // Offline / unreachable server: the UI still works; the socket
-            // reconnect loop and the next unlock retry the session. Error
-            // details are never logged (they can embed URLs/identifiers).
+            // reconnect loop and the next unlock retry the session. The
+            // diagnostics line carries the stage + error type/code only —
+            // never full error strings, which can embed URLs/identifiers.
+            diagnostics.record("boot: failed at stage=\(stage): \(BootDiagnostics.describe(error))")
+            connectionState = .disconnected
+        }
+    }
+
+    /// The WS handshake was rejected with 401/403 — the access token is dead
+    /// (15-minute JWTs). Mint a fresh session, then reconnect the socket.
+    private func reauthenticateAndReconnect() async {
+        guard let accountID = signal.accountID else { return }
+        do {
+            do {
+                try await api.refreshSession()
+            } catch {
+                // Refresh token consumed/expired — full login re-challenge.
+                try await api.login(accountID: accountID)
+            }
+            diagnostics.record("boot: session re-minted after ws auth expiry")
+            socket.connect()
+        } catch {
+            diagnostics.record("boot: re-auth failed: \(BootDiagnostics.describe(error))")
             connectionState = .disconnected
         }
     }
@@ -252,6 +298,7 @@ struct RootView: View {
         .sheet(isPresented: $environment.showSettings) {
             SettingsView(
                 orbot: environment.orbot,
+                diagnostics: environment.diagnostics,
                 localFingerprint: (try? environment.signal.localFingerprint()) ?? "—",
                 connectionState: environment.connectionState,
                 onDeleteAccount: { environment.deleteAccount() },

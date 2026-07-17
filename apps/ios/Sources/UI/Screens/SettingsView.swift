@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 /// accents, sections Security / Privacy / Account / Network / Appearance.
 public struct SettingsView: View {
     @ObservedObject var orbot: OrbotIntegration
+    @ObservedObject var diagnostics: BootDiagnostics
     public let localFingerprint: String
     public let connectionState: WebSocketClient.ConnectionState
     public var onDeleteAccount: () -> Void
@@ -38,11 +39,13 @@ public struct SettingsView: View {
     @State private var jailbreakResult = JailbreakDetector.Result(suspicious: false, reasons: [])
 
     public init(orbot: OrbotIntegration,
+                diagnostics: BootDiagnostics,
                 localFingerprint: String,
                 connectionState: WebSocketClient.ConnectionState,
                 onDeleteAccount: @escaping () -> Void,
                 onDismiss: @escaping () -> Void) {
         self.orbot = orbot
+        self.diagnostics = diagnostics
         self.localFingerprint = localFingerprint
         self.connectionState = connectionState
         self.onDeleteAccount = onDeleteAccount
@@ -258,6 +261,13 @@ public struct SettingsView: View {
                 settingLabel("Connection", icon: "dot.radiowaves.left.and.right")
                 Spacer()
                 connectionStatus
+            }
+            // Privacy-safe stage log — how connection failures get diagnosed
+            // on-device without a debugger (port of Android's Diagnostics).
+            NavigationLink {
+                DiagnosticsView(diagnostics: diagnostics)
+            } label: {
+                settingLabel("Connection diagnostics", icon: "waveform.path.ecg")
             }
         } header: {
             Text("Network")
