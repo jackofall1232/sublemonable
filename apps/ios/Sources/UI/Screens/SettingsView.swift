@@ -3,7 +3,9 @@
 // See the LICENSE file in the repository root for full license text.
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import AVFoundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Settings per design_system.screens.settings: dark grouped list with lemon
 /// accents, sections Security / Privacy / Account / Network / Appearance.
@@ -18,6 +20,16 @@ public struct SettingsView: View {
     @AppStorage("org.sublemonable.default-ttl") private var defaultTTL: Int = 0
     @AppStorage("org.sublemonable.default-burn-on-read") private var defaultBurnOnRead = false
     @AppStorage("org.sublemonable.biometric-lock") private var biometricLock = true
+
+    // Notification sound: "" (or missing) = branded default, "custom" = user
+    // file. Mirrors NotificationSoundStore.preferenceKey so the row reflects
+    // changes immediately.
+    @AppStorage(NotificationSoundStore.preferenceKey) private var notificationSound = ""
+    @State private var showSoundImporter = false
+    @State private var soundImportError: String?
+    @State private var isImportingSound = false
+    // Retained so preview playback isn't deallocated mid-sound.
+    @State private var previewPlayer: AVAudioPlayer?
 
     @State private var showFingerprint = false
     @State private var confirmDelete = false
@@ -45,6 +57,7 @@ public struct SettingsView: View {
                 }
                 securitySection
                 privacySection
+                notificationsSection
                 accountSection
                 networkSection
                 appearanceSection
@@ -61,6 +74,24 @@ public struct SettingsView: View {
                     Button("Done", action: onDismiss)
                         .foregroundColor(.lemon)
                 }
+            }
+            .fileImporter(
+                isPresented: $showSoundImporter,
+                allowedContentTypes: [.audio],
+                allowsMultipleSelection: false
+            ) { result in
+                handleSoundImport(result)
+            }
+            .alert(
+                "Couldn't set that sound",
+                isPresented: Binding(
+                    get: { soundImportError != nil },
+                    set: { if !$0 { soundImportError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { soundImportError = nil }
+            } message: {
+                Text(soundImportError ?? "")
             }
         }
         .tint(.lemon)
@@ -135,6 +166,56 @@ public struct SettingsView: View {
             Toggle(isOn: $defaultBurnOnRead) {
                 settingLabel("Burn on read by default", icon: "flame")
             }
+        }
+        .listRowBackground(Color.backgroundSecondary)
+    }
+
+    private var notificationsSection: some View {
+        Section {
+            HStack {
+                settingLabel("Notification sound", icon: "bell.badge")
+                Spacer()
+                Text(notificationSound == "custom" ? "Custom" : "Sublemonable")
+                    .font(SubFont.body(TypeScale.sm))
+                    .foregroundColor(.textMuted)
+            }
+
+            Button {
+                playPreview()
+            } label: {
+                settingLabel("Preview current sound", icon: "play.circle")
+            }
+
+            Button {
+                showSoundImporter = true
+            } label: {
+                if isImportingSound {
+                    HStack(spacing: Spacing.s3) {
+                        ProgressView().tint(.lemon).frame(width: 24)
+                        Text("Converting…")
+                            .font(SubFont.body(TypeScale.base))
+                            .foregroundColor(.textSecondary)
+                    }
+                } else {
+                    settingLabel("Choose your own sound…", icon: "square.and.arrow.down")
+                }
+            }
+            .disabled(isImportingSound)
+
+            if notificationSound == "custom" {
+                Button {
+                    NotificationSoundStore.useDefault()
+                } label: {
+                    settingLabel("Reset to Sublemonable sound", icon: "arrow.uturn.backward")
+                }
+            }
+
+            Text("Your file is converted to a short alert tone (max 30s) and "
+                 + "stored only on this device. Content-free alerts are unaffected.")
+                .font(SubFont.body(TypeScale.xs))
+                .foregroundColor(.textMuted)
+        } header: {
+            Text("Notifications")
         }
         .listRowBackground(Color.backgroundSecondary)
     }
@@ -219,6 +300,45 @@ public struct SettingsView: View {
                     .font(SubFont.mono(TypeScale.xs))
                     .foregroundColor(.textSecondary)
             }
+        }
+    }
+
+    // MARK: Notification sound handlers
+
+    private func handleSoundImport(_ result: Result<[URL], Error>) {
+        guard case let .success(urls) = result, let source = urls.first else {
+            // A cancelled picker returns .failure or empty — not an error to show.
+            return
+        }
+        isImportingSound = true
+        // Transcode off the main thread (AVAssetReader/Writer + file I/O).
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = NotificationSoundStore.importCustomSound(from: source)
+            DispatchQueue.main.async {
+                isImportingSound = false
+                switch outcome {
+                case .success:
+                    // @AppStorage picks up the "custom" flag written by the store.
+                    playPreview()
+                case let .failure(error):
+                    soundImportError = error.errorDescription
+                }
+            }
+        }
+    }
+
+    private func playPreview() {
+        guard let url = NotificationSoundStore.previewURL() else { return }
+        do {
+            // Respect the silent switch is NOT desired for a preview — use
+            // playback so the user actually hears their pick even on silent.
+            try AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+            let player = try AVAudioPlayer(contentsOf: url)
+            previewPlayer = player
+            player.play()
+        } catch {
+            // Preview is best-effort; never surface a playback failure as an error.
         }
     }
 

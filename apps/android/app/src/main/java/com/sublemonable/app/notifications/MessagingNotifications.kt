@@ -9,10 +9,14 @@ import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -30,11 +34,35 @@ import com.sublemonable.app.R
  */
 object MessagingNotifications {
 
-    private const val CHANNEL_ID = "messages"
+    // A channel's sound is immutable once created: changing setSound() on an
+    // existing channel is silently ignored until the app is reinstalled. To
+    // roll out a new sound we must publish a NEW channel id and delete the old
+    // one. Bump this suffix (v2 -> v3 -> ...) any time the sound changes.
+    private const val CHANNEL_ID = "messages_v2"
+    private val LEGACY_CHANNEL_IDS = listOf("messages")
     private const val NOTIFICATION_ID = 1001
+
+    /** URI of the bundled custom sound in res/raw/new_message.(wav|ogg). */
+    private fun soundUri(context: Context): Uri =
+        Uri.parse(
+            "${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/${R.raw.new_message}",
+        )
 
     fun ensureChannel(context: Context) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        // Remove any pre-custom-sound channels so users aren't left on the old
+        // default tone. Safe to call repeatedly; unknown ids are ignored.
+        LEGACY_CHANNEL_IDS.forEach { manager.deleteNotificationChannel(it) }
+
+        // USAGE_NOTIFICATION_COMMUNICATION_INSTANT marks this as a messaging
+        // alert so the system routes/ducks it appropriately; SONIFICATION is
+        // the correct content type for a short UI tone (not music/speech).
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+
         val channel = NotificationChannel(
             CHANNEL_ID,
             context.getString(R.string.notification_channel_name),
@@ -46,6 +74,9 @@ object MessagingNotifications {
             setShowBadge(true)
             enableLights(false)
             enableVibration(true)
+            // Custom notification tone bundled in res/raw. The user can still
+            // override or silence it in system channel settings.
+            setSound(soundUri(context), audioAttributes)
         }
         manager.createNotificationChannel(channel)
     }
@@ -85,6 +116,43 @@ object MessagingNotifications {
 
     fun cancelAll(context: Context) {
         NotificationManagerCompat.from(context).cancelAll()
+    }
+
+    /**
+     * Opens the system's per-channel notification settings for the messages
+     * channel, where the user can pick ANY sound (a system ringtone or their
+     * own audio file) or silence it entirely.
+     *
+     * This is deliberately the override mechanism on Android rather than an
+     * in-app file picker: the OS picker is richer, respects scoped storage,
+     * and — importantly — a user's choice here is NOT overwritten when we call
+     * [ensureChannel] again on next launch (Android ignores sound changes on an
+     * already-created channel). Their choice only resets if we bump CHANNEL_ID
+     * to ship a new *default*, which is a deliberate, rare event.
+     *
+     * Returns false if no activity could handle the intent (never throws).
+     */
+    fun openSoundSettings(context: Context): Boolean {
+        val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            putExtra(Settings.EXTRA_CHANNEL_ID, CHANNEL_ID)
+        }
+        return try {
+            context.startActivity(intent)
+            true
+        } catch (e: android.content.ActivityNotFoundException) {
+            // Fall back to the app's notification settings if the specific
+            // channel screen isn't available on this OEM/OS build.
+            try {
+                context.startActivity(
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName),
+                )
+                true
+            } catch (e2: android.content.ActivityNotFoundException) {
+                false
+            }
+        }
     }
 
     private fun canPost(context: Context): Boolean {

@@ -7,6 +7,7 @@ package com.sublemonable.app.ui.screens
 
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.sublemonable.app.MessagingCoordinator
+import com.sublemonable.app.notifications.MessagingNotifications
 import com.sublemonable.app.data.SettingsRepository
 import com.sublemonable.app.data.TransportState
 import com.sublemonable.app.tor.TorIntegration
@@ -162,6 +164,31 @@ fun SettingsScreen(
             subtitle = "Encrypted signal — the server never knows read status",
             checked = settings.readReceipts,
             onToggle = settingsRepository::setReadReceipts,
+        )
+
+        // ----- Notifications -------------------------------------------------
+        SectionHeader("Notifications")
+        ClickableRow(
+            title = "Notification sound",
+            subtitle = "Plays the Sublemonable tone by default. Tap to pick your " +
+                "own sound or silence it.",
+            trailing = {
+                Text(
+                    text = "Change",
+                    fontFamily = MonoFamily,
+                    fontSize = TypeScale.Sm,
+                    color = Lemon,
+                )
+            },
+            onClick = {
+                if (!MessagingNotifications.openSoundSettings(context)) {
+                    Toast.makeText(
+                        context,
+                        "Couldn't open notification settings on this device.",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
         )
 
         // ----- Account -------------------------------------------------------
